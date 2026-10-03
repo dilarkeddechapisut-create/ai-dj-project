@@ -24,7 +24,7 @@ try:
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
     if GOOGLE_API_KEY:
         genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-3.6-flash')
     else:
         model = None
 except Exception as e:
