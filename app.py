@@ -24,7 +24,7 @@ try:
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
     if GOOGLE_API_KEY:
         genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('gemini-3.6-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
     else:
         model = None
 except Exception as e:
@@ -208,8 +208,14 @@ if st.button("🎵 จัด Playlist ให้หน่อย", type="primary",
         with st.spinner("DJ (Gemini) กำลังตีความความรู้สึกและวิเคราะห์รายเพลง..."):
             t_energy, t_valence, t_tempo = analyze_mood_with_gemini(mood_text)
             
-            user_features = [[0.5, t_energy, t_valence, t_tempo]]
-            scaled_input = scaler.transform(user_features)
+            # สร้าง DataFrame พร้อมกำหนดชื่อคอลัมน์ให้ตรงกับที่ Scaler เคยเรียนรู้ไว้ เพื่อป้องกัน Warning
+            try:
+                user_df = pd.DataFrame([[0.5, t_energy, t_valence, t_tempo]], columns=scaler.feature_names_in_)
+                scaled_input = scaler.transform(user_df)
+            except AttributeError:
+                user_features = [[0.5, t_energy, t_valence, t_tempo]]
+                scaled_input = scaler.transform(user_features)
+
             predicted_cluster = kmeans.predict(scaled_input)[0]
             
             cluster_songs = df_songs[df_songs['cluster_id'] == predicted_cluster]
