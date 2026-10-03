@@ -251,16 +251,21 @@ except Exception:
     st.stop()
 
 # ==========================================
-# 4. ฟังก์ชันประมวลผลข้อมูล (Gemini + Multi-API Image Search)
+# 4. ฟังก์ชันประมวลผลข้อมูล
 # ==========================================
 def clean_json_string(text):
     """คลีนข้อความจาก Gemini ให้เป็น JSON สตริงบริสุทธิ์"""
     if not text:
         return ""
-    text = re.sub(r'^```json\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
-    text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
-    text = re.sub(r'```$', '', text, flags=re.MULTILINE)
-    return text.strip()
+    clean_text = text.strip()
+    if clean_text.startswith("```"):
+        lines = clean_text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        clean_text = "\n".join(lines).strip()
+    return clean_text
 
 def analyze_mood_with_gemini(text):
     """แปลงความรู้สึกเป็นค่า Energy, Valence, Tempo"""
@@ -287,8 +292,10 @@ def analyze_mood_with_gemini(text):
 
 def fallback_analyze_mood(text):
     text = text.lower()
-    if any(word in text for word in ["เศร้า", "เหงา", "อกหัก", "ดิ่ง"]): return 0.2, 0.2, 80.0
-    elif any(word in text for word in ["สนุก", "มันส์", "เต้น"]): return 0.8, 0.8, 130.0
+    if any(word in text for word in ["เศร้า", "เหงา", "อกหัก", "ดิ่ง"]): 
+        return 0.2, 0.2, 80.0
+    elif any(word in text for word in ["สนุก", "มันส์", "เต้น"]): 
+        return 0.8, 0.8, 130.0
     return 0.5, 0.5, 100.0
 
 @st.cache_data(ttl=3600)
@@ -327,4 +334,110 @@ def get_spotify_track_info(track_name, artist_name):
                 prev = t.get('preview', None)
                 link = t.get('link', None)
                 if img:
-                    return img, prev
+                    return img, prev, link
+    except Exception:
+        pass
+
+    return None, None, None
+
+def get_song_reason(data, index, row):
+    """คำนวณและสร้างเหตุผลรายเพลงให้ตรงกับเพลงแบบ 100%"""
+    reasons_list = data.get("song_reasons", [])
+    
+    # 1. ดึงจาก Gemini AI ตาม Index
+    if isinstance(reasons_list, list) and index < len(reasons_list):
+        item = reasons_list[index]
+        if isinstance(item, dict):
+            r = item.get("reason")
+            tag = item.get("mood_tag", "#DJChoice")
+            if r: 
+                return r, tag
+
+    # 2. คำนวณแบบ Dynamic จาก Audio Features ของเพลงนั้นๆ
+    energy = row.get('energy', 0.5)
+    valence = row.get('valence', 0.5)
+    tempo = row.get('tempo', 100)
+    
+    if energy > 0.7:
+        reason_fb = f"เพลงนี้มีจังหวะพลังงานสูง (Energy: {energy:.2f}, Tempo: {int(tempo)} BPM) ช่วยปลุกความสดใส เติมไฟให้อารมณ์ของคุณกระปรี้กระเปร่าขึ้นทันที"
+        tag_fb = "🔥 #เพิ่มพลังใจ"
+    elif valence < 0.35:
+        reason_fb = f"ทำนองนุ่มลึกในโทนอารมณ์นี้ (Valence: {valence:.2f}) จะอยู่เป็นเพื่อนโอบกอดความรู้สึกของคุณในห้วงเวลาที่ต้องการความเข้าใจ"
+        tag_fb = "🌙 #โอบกอดอารมณ์"
+    elif valence > 0.65:
+        reason_fb = f"เสียงดนตรีฟีลกู้ด (Valence: {valence:.2f}) เพิ่มรอยยิ้ม เติมบรรยากาศความสุขและความเบาสบายให้วันของคุณ"
+        tag_fb = "✨ #ฟีลกู้ดชิลๆ"
+    else:
+        reason_fb = f"จังหวะกำลังดีปานกลาง ({int(tempo)} BPM) ผสมผสานดนตรีที่สมดุล ให้ความรู้สึกผ่อนคลายและเข้ากับบรรยากาศได้อย่างลงตัว"
+        tag_fb = "🍃 #ผ่อนคลายสมดุล"
+        
+    return reason_fb, tag_fb
+
+def save_feedback(mood, cluster, feedback_type):
+    try:
+        url = st.secrets.get("SHEETS_WEB_APP_URL", "")
+        if url:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            payload = {"timestamp": timestamp, "mood": mood, "cluster": str(cluster), "feedback": feedback_type}
+            requests.post(url, json=payload)
+    except Exception:
+        pass
+
+# ==========================================
+# 5. จัดการ Session State
+# ==========================================
+if 'playlist_data' not in st.session_state:
+    st.session_state.playlist_data = None
+if 'feedback_submitted' not in st.session_state:
+    st.session_state.feedback_submitted = False
+if 'current_card_index' not in st.session_state:
+    st.session_state.current_card_index = 0
+
+# ==========================================
+# 6. ส่วนรับข้อมูลจากผู้ใช้ (UI)
+# ==========================================
+with st.container():
+    st.markdown("##### 🎙️ เล่าความรู้สึกของคุณผ่านเสียงหรือพิมพ์ข้อความ")
+    
+    text_from_mic = speech_to_text(
+        language='th-TH', 
+        start_prompt="🎙 กดเพื่อพูดความรู้สึก", 
+        stop_prompt="🛑 กำลังฟัง... (กดเพื่อหยุด)", 
+        just_once=False,
+        key='STT'
+    )
+
+    default_text = text_from_mic if text_from_mic else ""
+    mood_text = st.text_area("ความรู้สึกของคุณ:", value=default_text, placeholder="เช่น วันนี้เลิกงานแล้ว เหนื่อยมากๆ อยากหาเพลงชิลๆ ฟังผ่อนคลาย...", height=95)
+
+    num_songs = st.slider("🎵 จำนวนเพลงที่ต้องการสุ่มจัด:", min_value=3, max_value=12, value=5, step=1)
+
+    if st.button("✨ ให้ AI DJ จัดเพลงให้ทันที", type="primary", use_container_width=True):
+        if not mood_text:
+            st.warning("กรุณาพิมพ์หรือพูดความรู้สึกของคุณก่อนครับ")
+        else:
+            with st.spinner("🎧 DJ AI กำลังอ่านใจและวิเคราะห์อารมณ์ดนตรี..."):
+                t_energy, t_valence, t_tempo = analyze_mood_with_gemini(mood_text)
+                
+                try:
+                    user_df = pd.DataFrame([[0.5, t_energy, t_valence, t_tempo]], columns=scaler.feature_names_in_)
+                    scaled_input = scaler.transform(user_df)
+                except AttributeError:
+                    user_features = [[0.5, t_energy, t_valence, t_tempo]]
+                    scaled_input = scaler.transform(user_features)
+
+                predicted_cluster = kmeans.predict(scaled_input)[0]
+                cluster_songs = df_songs[df_songs['cluster_id'] == predicted_cluster]
+                sampled_songs = cluster_songs.sample(min(num_songs, len(cluster_songs))).reset_index(drop=True)
+                
+                song_items_prompt = []
+                for idx, r in sampled_songs.iterrows():
+                    song_items_prompt.append(f"เพลงลำดับ {idx}: '{r['track_name']}' โดย {r['artists']}")
+                song_list_str = "\n".join(song_items_prompt)
+
+                dj_response = f"จัดบทเพลงเซ็ตพิเศษตามอารมณ์ '{mood_text[:20]}...' มาให้คุณฟังแล้วครับ!"
+                song_reasons = []
+
+                if model:
+                    prompt_dj = f"""
+                    คุณ
