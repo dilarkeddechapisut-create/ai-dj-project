@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import google.generativeai as genai
 import requests
 from datetime import datetime
-from streamlit_mic_recorder import speech_to_text # นำเข้าระบบไมโครโฟน
+from streamlit_mic_recorder import speech_to_text
 
 # ==========================================
 # 1. ตั้งค่าหน้าเว็บ
@@ -42,9 +42,10 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 4. ฟังก์ชันเบื้องหลัง (อัปเกรดความฉลาดด้วย Gemini)
+# 4. ฟังก์ชันเบื้องหลัง (Gemini + ดึงข้อมูลเพลง)
 # ==========================================
 def analyze_mood_with_gemini(text):
+    """ใช้ Gemini แปลงความรู้สึกเป็นค่า Energy, Valence, Tempo"""
     prompt = f"""
     คุณคือนักจิตวิทยาทางดนตรี จงวิเคราะห์ข้อความต่อไปนี้แล้วแปลงเป็นค่าทางดนตรี 3 ค่า
     1. Energy (0.0 ถึง 1.0): 0 คือสงบ/อ่อนล้า, 1 คือมันส์/พลังงานล้น
@@ -66,10 +67,33 @@ def analyze_mood_with_gemini(text):
         return fallback_analyze_mood(text)
 
 def fallback_analyze_mood(text):
+    """ระบบสำรองหาก Gemini ขัดข้อง"""
     text = text.lower()
     if any(word in text for word in ["เศร้า", "เหงา", "อกหัก", "ดิ่ง"]): return 0.2, 0.2, 80.0
     elif any(word in text for word in ["สนุก", "มันส์", "เต้น"]): return 0.8, 0.8, 130.0
     return 0.5, 0.5, 100.0
+
+@st.cache_data(ttl=3600)
+def get_spotify_track_info(track_name, artist_name):
+    """
+    ดึงรูปปก, ตัวอย่างเพลง (Audio Preview), และลิงก์ฟังเพลง
+    (ใช้ Search API เพื่อค้นหาปกเพลงและไฟล์ตัวอย่างเสียง)
+    """
+    try:
+        query = f"{track_name} {artist_name}"
+        url = f"https://itunes.apple.com/search?term={requests.utils.quote(query)}&limit=1&entity=song"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('resultCount', 0) > 0:
+                track = data['results'][0]
+                img_url = track.get('artworkUrl100', '').replace('100x100bb', '300x300bb') # ปรับรูปให้ชัดขึ้น
+                preview_url = track.get('previewUrl', None)
+                spot_url = track.get('trackViewUrl', None)
+                return img_url, preview_url, spot_url
+    except Exception:
+        pass
+    return None, None, None
 
 def save_feedback(mood, cluster, feedback_type):
     try:
@@ -78,7 +102,7 @@ def save_feedback(mood, cluster, feedback_type):
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             payload = {"timestamp": timestamp, "mood": mood, "cluster": str(cluster), "feedback": feedback_type}
             requests.post(url, json=payload)
-    except:
+    except Exception:
         pass
 
 # ==========================================
@@ -92,9 +116,9 @@ if 'feedback_submitted' not in st.session_state:
 # ==========================================
 # 6. ส่วน UI หน้าเว็บ (ไมโครโฟน + กล่องข้อความ)
 # ==========================================
-st.markdown("### 🗣️ เล่าความรู้สึกของคุณ")
+st.markdown("### 🗣️️ เล่าความรู้สึกของคุณ")
 
-# 6.1 ปุ่มกดพูด (แปลงเสียงเป็นข้อความ)
+# ปุ่มกดพูด (แปลงเสียงเป็นข้อความ)
 text_from_mic = speech_to_text(
     language='th-TH', 
     start_prompt="🎙️ กดเพื่อพูด (พูดเสร็จให้กดซ้ำอีกรอบ)", 
@@ -103,7 +127,7 @@ text_from_mic = speech_to_text(
     key='STT'
 )
 
-# 6.2 กล่องรับข้อความ (ถ้าระบบได้ยินเสียง จะเอาข้อความมาใส่ในกล่องนี้อัตโนมัติ)
+# กล่องรับข้อความ
 default_text = text_from_mic if text_from_mic else ""
 mood_text = st.text_area("หรือพิมพ์ความรู้สึกที่นี่:", value=default_text, placeholder="เช่น วันนี้ฝนตก เหงาจังเลย...")
 
@@ -126,13 +150,12 @@ if st.button("🎵 จัด Playlist ให้หน่อย", type="primary",
             prompt_dj = f"คุณคือ 'DJ AI' ผู้ใช้บอกว่า: '{mood_text}' เพลงที่เลือกคือ: {song_list_str} จงทักทายสั้นๆ ภาษาไทย เป็นกันเอง"
             try:
                 dj_response = model.generate_content(prompt_dj).text
-            except:
+            except Exception:
                 dj_response = "(ระบบ Gemini ขัดข้องชั่วคราว) แต่นี่คือเพลงที่เราจัดไว้ให้ครับ!"
 
             st.session_state.playlist_data = {
                 "mood": mood_text,
                 "cluster": predicted_cluster,
-                "songs_str": song_list_str,
                 "dj_text": dj_response,
                 "sampled_songs": sampled_songs,
                 "features": {"energy": t_energy, "valence": t_valence, "tempo": t_tempo}
@@ -149,11 +172,36 @@ if st.session_state.playlist_data:
     st.markdown("### 💬 ข้อความจาก DJ AI (Powered by Google Gemini)")
     st.info(data["dj_text"])
     
-    st.markdown(f"### 🎼 รายชื่อเพลง (กลุ่มดนตรีที่ {data['cluster']})")
-    st.text(data["songs_str"])
+    st.markdown(f"### 🎼 รายชื่อเพลงแนะนำ (กลุ่มดนตรีที่ {data['cluster']})")
 
-    # วาดกราฟ Radar
-    st.markdown("---")
+    # วนลูปแสดงเพลงทีละบรรทัด พร้อมรูปปก 🌟
+    for _, row in data["sampled_songs"].iterrows():
+        # ดึงข้อมูลจาก Spotify / Store
+        img_url, preview_url, spot_url = get_spotify_track_info(row['track_name'], row['artists'])
+        
+        # แบ่งหน้าจอเป็น 2 คอลัมน์ (ซ้ายรูป ขวาข้อความ)
+        col1, col2 = st.columns([1, 4])
+        
+        with col1:
+            if img_url:
+                st.image(img_url, width=120)
+            else:
+                st.write("💿 No Image")
+                
+        with col2:
+            st.subheader(row['track_name'])
+            st.write(f"🎤 ศิลปิน: {row['artists']}")
+            
+            if spot_url:
+                st.markdown(f"[🎧 ฟังเพลงเต็มคลิกที่นี่]({spot_url})")
+            if preview_url:
+                st.audio(preview_url, format="audio/mp3")
+                
+        st.divider() # เส้นคั่นแต่ละเพลง
+
+    # ----------------------------------------
+    # กราฟ Radar Chart
+    # ----------------------------------------
     f_energy = data["features"]["energy"]
     f_valence = data["features"]["valence"]
     f_tempo_scaled = data["features"]["tempo"] / 200.0
@@ -166,10 +214,12 @@ if st.session_state.playlist_data:
     fig = go.Figure(data=go.Scatterpolar(
         r=values, theta=categories, fill='toself', fillcolor='rgba(29, 185, 84, 0.5)', line_color='#1DB954'
     ))
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=False, title="📊 ระดับอารมณ์ที่คุณต้องการ")
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=False, title="📊 ระดับอารมณ์ที่คุณต้องการ (วิเคราะห์โดย AI)")
     st.plotly_chart(fig, use_container_width=True)
 
+    # ----------------------------------------
     # ระบบ Feedback
+    # ----------------------------------------
     st.markdown("---")
     st.markdown("### 📝 คุณชอบ Playlist นี้ไหม?")
     
@@ -186,4 +236,4 @@ if st.session_state.playlist_data:
                 st.session_state.feedback_submitted = True
                 st.rerun()
     else:
-        st.success("💖 ขอบคุณสำหรับเสียงตอบรับครับ! ข้อมูลถูกบันทึกลงฐานข้อมูลเพื่อพัฒนา AI เรียบร้อยแล้ว")
+        st.success("💖 ขอบคุณสำหรับเสียงตอบรับครับ! ข้อมูลถูกบันทึกลงฐานข้อมูลเรียบร้อยแล้ว")
