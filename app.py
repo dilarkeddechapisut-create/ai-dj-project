@@ -41,22 +41,31 @@ def analyze_mood_to_features(text):
     if any(word in text for word in ["โกรธ", "โมโห", "ร็อค"]): return 0.9, 0.3, 140.0
     return energy, valence, tempo
 
-# 4. ฟังก์ชันค้นหาเพลงใน Spotify เพื่อดึงรูปปก 🌟 (ส่วนที่เพิ่มมาใหม่)
+# 4. ฟังก์ชันค้นหาเพลงใน Spotify เพื่อดึงรูปปก 🌟 (แบบดักจับ Error)
 def get_spotify_track_info(track_name, artist_name):
-    # ค้นหาโดยใช้ชื่อเพลงและชื่อศิลปิน
-    query = f"track:{track_name} artist:{artist_name}"
-    results = sp.search(q=query, type='track', limit=1)
-    
-    if results['tracks']['items']:
-        track_data = results['tracks']['items'][0]
-        # ดึงรูปปกอัลบั้ม (เอาภาพขนาดกลาง index 1)
-        image_url = track_data['album']['images'][1]['url'] if track_data['album']['images'] else None
-        # ดึงเสียงตัวอย่าง 30 วิ (บางเพลงอาจจะไม่มี)
-        preview_url = track_data['preview_url'] 
-        # ลิงก์ไปฟังเต็มๆ
-        spotify_url = track_data['external_urls']['spotify']
-        return image_url, preview_url, spotify_url
-    return None, None, None
+    try:
+        # ค้นหาโดยใช้ชื่อเพลงและชื่อศิลปิน
+        query = f"track:{track_name} artist:{artist_name}"
+        results = sp.search(q=query, type='track', limit=1)
+        
+        if results and results['tracks']['items']:
+            track_data = results['tracks']['items'][0]
+            
+            # ดึงรูปปกอัลบั้ม (เช็คก่อนว่ามีรูปไหม)
+            images = track_data['album']['images']
+            image_url = images[1]['url'] if len(images) > 1 else (images[0]['url'] if images else None)
+            
+            preview_url = track_data.get('preview_url') 
+            spotify_url = track_data['external_urls'].get('spotify')
+            
+            return image_url, preview_url, spotify_url
+            
+        return None, None, None
+        
+    except Exception as e:
+        # ถ้ามี Error จาก Spotify (เช่น ค้นหาคำแปลกๆ หรือ API มีปัญหา) ให้ข้ามไปเลย แอปจะได้ไม่พัง
+        print(f"Spotify API Error: {e}") 
+        return None, None, None
 
 # 5. UI หน้าเว็บ
 mood_text = st.text_area("วันนี้คุณรู้สึกอย่างไร?", placeholder="เช่น เหงาจังเลย อยากฟังเพลงเศร้า")
