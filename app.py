@@ -201,7 +201,7 @@ mood_text = st.text_area("หรือพิมพ์ความรู้สึ
 
 num_songs = st.slider("🎵 เลือกจำนวนเพลงที่ต้องการใน Playlist:", min_value=5, max_value=15, value=5, step=1)
 
-if st.button("🎵 จัด Playlist ให้หน่อย", type="primary", use_container_width=True):
+if st.button("🎵 จัด Playlist ให้หน่อย", type="primary", width="stretch"):
     if not mood_text:
         st.warning("กรุณาพิมพ์หรือพูดความรู้สึกของคุณก่อนครับ")
     else:
@@ -335,7 +335,7 @@ if st.session_state.playlist_data:
         r=values, theta=categories, fill='toself', fillcolor='rgba(29, 185, 84, 0.5)', line_color='#1DB954'
     ))
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=False, title="📊 ระดับอารมณ์ที่คุณต้องการ (วิเคราะห์โดย AI)")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.markdown("---")
     st.markdown("### 📝 คุณชอบ Playlist นี้ไหม?")
@@ -343,12 +343,12 @@ if st.session_state.playlist_data:
     if not st.session_state.feedback_submitted:
         col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
-            if st.button("👍 โดนใจสุดๆ", use_container_width=True):
+            if st.button("👍 โดนใจสุดๆ", width="stretch"):
                 save_feedback(data["mood"], data["cluster"], "Like")
                 st.session_state.feedback_submitted = True
                 st.rerun()
         with col2:
-            if st.button("👎 ไม่ค่อยเข้ากัน", use_container_width=True):
+            if st.button("👎 ไม่ค่อยเข้ากัน", width="stretch"):
                 save_feedback(data["mood"], data["cluster"], "Dislike")
                 st.session_state.feedback_submitted = True
                 st.rerun()
