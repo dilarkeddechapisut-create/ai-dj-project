@@ -103,7 +103,7 @@ try:
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
     if GOOGLE_API_KEY:
         genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('gemini-3.6-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
     else:
         model = None
 except Exception:
@@ -188,6 +188,18 @@ def save_feedback(mood, cluster, feedback_type):
     except Exception:
         pass
 
+def clean_json_string(text):
+    """คลีนสตริง JSON ให้ปลอดภัยจากสัญลักษณ์โค้ดบล็อก"""
+    clean_text = text.strip()
+    if clean_text.startswith("```"):
+        lines = clean_text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        clean_text = "\n".join(lines).strip()
+    return clean_text
+
 # ==========================================
 # 5. จัดการ Session State
 # ==========================================
@@ -206,7 +218,7 @@ with st.container():
     
     text_from_mic = speech_to_text(
         language='th-TH', 
-        start_prompt="🎙️️ กดเพื่อพูดความรู้สึก", 
+        start_prompt="🎙 กดเพื่อพูดความรู้สึก", 
         stop_prompt="🛑 กำลังฟัง... (กดเพื่อหยุด)", 
         just_once=False,
         key='STT'
@@ -262,5 +274,188 @@ with st.container():
                             prompt_dj,
                             generation_config={"response_mime_type": "application/json"}
                         )
-                        raw_text = response.text.strip()
-                        clean_text = re.sub(r'^```json\s*|^
+                        clean_text = clean_json_string(response.text)
+                        
+                        dj_data = json.loads(clean_text)
+                        dj_response = dj_data.get("dj_text", dj_response)
+                        song_reasons = dj_data.get("reasons", {})
+                    except Exception:
+                        dj_response = "จัดเพลงเซ็ตพิเศษตามอารมณ์ของคุณเรียบร้อยแล้วครับ มาลองฟังกันเลย!"
+
+                st.session_state.playlist_data = {
+                    "mood": mood_text,
+                    "cluster": predicted_cluster,
+                    "dj_text": dj_response,
+                    "song_reasons": song_reasons,
+                    "sampled_songs": sampled_songs,
+                    "features": {"energy": t_energy, "valence": t_valence, "tempo": t_tempo}
+                }
+                st.session_state.feedback_submitted = False
+                st.session_state.current_card_index = 0
+
+# ==========================================
+# 7. ส่วนแสดงผลลัพธ์การ์ดเพลงสลับ (Card View)
+# ==========================================
+if st.session_state.playlist_data:
+    data = st.session_state.playlist_data
+    songs = data["sampled_songs"]
+    total_songs = len(songs)
+
+    st.markdown("---")
+    
+    # คำทักทายจาก DJ AI
+    st.markdown(f"""
+    <div class="dj-speech-box">
+        <span class="dj-badge">🤖 DJ AI Message</span>
+        <div style="font-size: 1.1rem; line-height: 1.6; font-weight: 500;">
+            "{data['dj_text']}"
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ปุ่มสลับโหมดการดู
+    view_mode = st.radio(
+        "รูปแบบการแสดงผล:", 
+        ["🃏 มุมมองการ์ดสลับ (Card Switcher)", "📋 รายการทั้งหมด (Grid View)"], 
+        horizontal=True
+    )
+
+    if "มุมมองการ์ดสลับ" in view_mode:
+        # --- 🃏 ระบบการ์ดสลับเพลง (Song Card Switcher) ---
+        
+        # แถบควบคุมปุ่ม สลับเพลง ก่อนหน้า / ถัดไป
+        nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+        
+        with nav_col1:
+            if st.button("⬅️ เพลงก่อนหน้า", use_container_width=True):
+                st.session_state.current_card_index = (st.session_state.current_card_index - 1) % total_songs
+                st.rerun()
+
+        with nav_col2:
+            st.markdown(f"<h5 style='text-align: center; margin-top: 5px;'>🎵 เพลงที่ {st.session_state.current_card_index + 1} จาก {total_songs}</h5>", unsafe_allow_html=True)
+
+        with nav_col3:
+            if st.button("เพลงถัดไป ➡️", use_container_width=True):
+                st.session_state.current_card_index = (st.session_state.current_card_index + 1) % total_songs
+                st.rerun()
+
+        # ดึงข้อมูลเพลงปัจจุบันที่เลือก
+        current_idx = st.session_state.current_card_index
+        row = songs.iloc[current_idx]
+        track_name = row['track_name']
+        artist_name = row['artists']
+        img_url, preview_url, spot_url = get_spotify_track_info(track_name, artist_name)
+        reason = data["song_reasons"].get(track_name, "เพลงนี้มีบรรยากาศและจังหวะที่เข้ากับระดับอารมณ์ของคุณได้อย่างลงตัว")
+
+        # แสดงผลการ์ดเพลงสลับ
+        st.markdown('<div class="song-card-container">', unsafe_allow_html=True)
+        
+        card_col1, card_col2 = st.columns([1, 1.8])
+        
+        with card_col1:
+            if img_url:
+                st.image(img_url, use_container_width=True)
+            else:
+                st.markdown("<div style='height: 200px; background: #334155; border-radius: 14px; display: flex; align-items: center; justify-content: center;'>💿 No Image</div>", unsafe_allow_html=True)
+                
+        with card_col2:
+            st.markdown(f"### {track_name}")
+            st.markdown(f"🎤 **ศิลปิน:** `{artist_name}`")
+            
+            st.markdown(f"""
+            <div class="reason-box">
+                💡 <b>มุมมอง DJ:</b> {reason}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.write("")
+            if preview_url:
+                st.audio(preview_url, format="audio/mp3")
+            if spot_url:
+                st.markdown(f"[🔗 เปิดฟังเวอร์ชันเต็มบน Apple Music / Web]({spot_url})")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # แถบ Quick Tabs ด้านล่างสำหรับการ์ดสลับ
+        tab_titles = [f"เพลงที่ {i+1}" for i in range(total_songs)]
+        selected_tab = st.pills("เลือกการ์ดเพลงด่วน:", tab_titles, default=f"เพลงที่ {current_idx + 1}")
+        if selected_tab:
+            new_idx = int(selected_tab.split()[-1]) - 1
+            if new_idx != st.session_state.current_card_index:
+                st.session_state.current_card_index = new_idx
+                st.rerun()
+
+    else:
+        # --- 📋 มุมมองการ์ดรายการทั้งหมด (Grid View) ---
+        for i, row in songs.iterrows():
+            track_name = row['track_name']
+            artist_name = row['artists']
+            img_url, preview_url, spot_url = get_spotify_track_info(track_name, artist_name)
+            reason = data["song_reasons"].get(track_name, "เพลงนี้ตรงกับระดับพลังงานและอารมณ์ที่คุณต้องการ")
+
+            st.markdown('<div class="song-card-container">', unsafe_allow_html=True)
+            c1, c2 = st.columns([1, 3])
+            
+            with c1:
+                if img_url:
+                    st.image(img_url, width=130)
+                else:
+                    st.write("💿 No Image")
+            with c2:
+                st.subheader(f"{i+1}. {track_name}")
+                st.markdown(f"🎤 **ศิลปิน:** `{artist_name}`")
+                st.markdown(f"<div class='reason-box'>💡 <b>ทำไมถึงแนะนำ:</b> {reason}</div>", unsafe_allow_html=True)
+                st.write("")
+                if preview_url:
+                    st.audio(preview_url, format="audio/mp3")
+                if spot_url:
+                    st.markdown(f"[🎧 คลิกฟังเพลงเต็ม]({spot_url})")
+                    
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # ==========================================
+    # 8. กราฟวิเคราะห์อารมณ์ & Feedback
+    # ==========================================
+    st.markdown("---")
+    
+    col_chart, col_feed = st.columns([1.2, 1])
+    
+    with col_chart:
+        f_energy = data["features"]["energy"]
+        f_valence = data["features"]["valence"]
+        f_tempo_scaled = data["features"]["tempo"] / 200.0
+
+        categories = ['ความมันส์ (Energy)', 'ความสดใส (Valence)', 'ความเร็ว (Tempo)']
+        values = [f_energy, f_valence, f_tempo_scaled]
+        categories.append(categories[0]) 
+        values.append(values[0])
+
+        fig = go.Figure(data=go.Scatterpolar(
+            r=values, theta=categories, fill='toself', fillcolor='rgba(0, 242, 254, 0.3)', line_color='#00F2FE'
+        ))
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])), 
+            showlegend=False, 
+            title="📊 กราฟวิเคราะห์โทนอารมณ์ดนตรี",
+            margin=dict(l=40, r=40, t=40, b=40)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_feed:
+        st.markdown("### 📝 ถูกใจ Playlist นี้ไหม?")
+        st.write("เสียงตอบรับของคุณจะช่วยให้ AI DJ ปรับปรุงการคัดสรรเพลงในครั้งถัดไปให้ดียิ่งขึ้น")
+        
+        if not st.session_state.feedback_submitted:
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button("👍 โดนใจมาก", use_container_width=True):
+                    save_feedback(data["mood"], data["cluster"], "Like")
+                    st.session_state.feedback_submitted = True
+                    st.rerun()
+            with btn_col2:
+                if st.button("👎 ยังไม่ค่อยโดน", use_container_width=True):
+                    save_feedback(data["mood"], data["cluster"], "Dislike")
+                    st.session_state.feedback_submitted = True
+                    st.rerun()
+        else:
+            st.success("💖 ขอบคุณสำหรับคำติชมครับ! ระบบบันทึกข้อมูลเรียบร้อยแล้ว")
