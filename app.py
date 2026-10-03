@@ -1,493 +1,370 @@
 import streamlit as st
-import time
+import pandas as pd
+import joblib
+import plotly.graph_objects as go
+import google.generativeai as genai
+import requests
+import json
+from datetime import datetime
 from streamlit_mic_recorder import speech_to_text
-
-# นำเข้า Service ต่างๆ
-from ai_service import get_playlist_from_ai
-from spotify_service import search_spotify_track
-from stats_service import create_radar_chart
-from feedback_service import save_feedback
-from preview_service import get_track_preview
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
 
 # ==========================================
-# 1. ตั้งค่าหน้าเพจ & CSS + Video Background
+# 1. ตั้งค่าหน้าเว็บ
 # ==========================================
-st.set_page_config(page_title="AI DJ Mood Matcher", page_icon="🎧", layout="centered")
+st.set_page_config(page_title="AI DJ Mood Matcher", page_icon="🎧")
+st.title("🎧 AI DJ: จัด Playlist ตามอารมณ์")
+st.markdown("พิมพ์บอกความรู้สึก หรือ **กดไมค์เพื่อพูด** เลือกจำนวนเพลง แล้วให้ AI DJ จัดเพลงและส่งเข้า Spotify ได้ทันที!")
 
-BG_VIDEO_URL = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260328_083109_283f3553-e28f-428b-a723-d639c617eb2b.mp4"
+# ==========================================
+# 2. ตั้งค่าการเชื่อมต่อ API (Gemini & Google Sheets)
+# ==========================================
+try:
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=GOOGLE_API_KEY)
+    model = genai.GenerativeModel('gemini-3.6-flash')
+except Exception as e:
+    st.error("🚨 ไม่พบ API Key! กรุณาตั้งค่า GOOGLE_API_KEY ใน Streamlit Secrets")
+    st.stop()
 
-st.markdown(f"""
-<style>
-    /* ทำพื้นหลังหลักโปร่งใสเพื่อมองเห็นวิดีโอด้านหลัง */
-    .stApp {{
-        background: transparent !important;
-        color: #ffffff;
-    }}
+# ==========================================
+# 3. ฟังก์ชันโหลดโมเดล Machine Learning
+# ==========================================
+@st.cache_resource
+def load_models():
+    km = joblib.load('kmeans_model.pkl')
+    sc = joblib.load('scaler.pkl')
+    df = pd.read_csv('spotify_clustered.csv')
+    return km, sc, df
 
-    /* จัดสไตล์ตัววิดีโอเป็น Background เต็มจอ */
-    #bg-video {{
-        position: fixed;
-        right: 0;
-        bottom: 0;
-        min-width: 100%;
-        min-height: 100%;
-        width: auto;
-        height: auto;
-        z-index: -100;
-        object-fit: cover;
-        filter: brightness(0.4);
-    }}
+try:
+    kmeans, scaler, df_songs = load_models()
+except Exception as e:
+    st.error("🚨 ไม่พบไฟล์โมเดล .pkl หรือ .csv กรุณาอัปโหลดขึ้น GitHub ให้ครบ")
+    st.stop()
 
-    /* ตกแต่ง Header ตรงกลาง */
-    .main-header {{
-        text-align: center;
-        margin-top: 10px;
-        margin-bottom: 5px;
-    }}
-    .main-header h1 {{
-        font-size: 2.3rem;
-        font-weight: 800;
-        color: #58a6ff;
-        display: inline-block;
-        margin-bottom: 8px;
-        text-shadow: 0 2px 10px rgba(0,0,0,0.8);
-    }}
-    .main-header p {{
-        color: #c9d1d9;
-        font-size: 1rem;
-        margin-bottom: 25px;
-        text-shadow: 0 1px 5px rgba(0,0,0,0.8);
-    }}
+# ==========================================
+# 4. ฟังก์ชันเบื้องหลัง (Gemini + Spotify API)
+# ==========================================
+def analyze_mood_with_gemini(text):
+    """ใช้ Gemini แปลงความรู้สึกเป็นค่า Energy, Valence, Tempo"""
+    prompt = f"""
+    คุณคือนักจิตวิทยาทางดนตรี จงวิเคราะห์ข้อความต่อไปนี้แล้วแปลงเป็นค่าทางดนตรี 3 ค่า
+    1. Energy (0.0 ถึง 1.0): 0 คือสงบ/อ่อนล้า, 1 คือมันส์/พลังงานล้น
+    2. Valence (0.0 ถึง 1.0): 0 คือเศร้า/หดหู่/โกรธ, 1 คือมีความสุข/สดใส
+    3. Tempo (60.0 ถึง 200.0): ความเร็วของเพลง (BPM)
 
-    /* หัวข้อและ Label */
-    .section-title {{
-        font-size: 1.15rem;
-        font-weight: 700;
-        margin-top: 10px;
-        margin-bottom: 12px;
-        color: #ffffff;
-        text-shadow: 0 1px 5px rgba(0,0,0,0.8);
-    }}
+    ข้อความผู้ใช้: "{text}"
 
-    .input-label {{
-        font-weight: 600;
-        color: #ffffff;
-        margin-top: 15px;
-        margin-bottom: 6px;
-        font-size: 0.95rem;
-        text-shadow: 0 1px 5px rgba(0,0,0,0.8);
-    }}
-
-    /* ปรับแต่ง Text Area ให้โปร่งแสงรับกับวิดีโอ */
-    div[data-testid="stTextArea"] textarea {{
-        background-color: rgba(22, 27, 34, 0.75) !important;
-        color: #ffffff !important;
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
-        border-radius: 10px !important;
-        font-size: 15px !important;
-        backdrop-filter: blur(5px);
-    }}
+    จงตอบกลับมาเป็นตัวเลข 3 ตัว คั่นด้วยเครื่องหมายจุลภาค (,) เท่านั้น ห้ามมีตัวอักษรอื่นเด็ดขาด
+    ตัวอย่างการตอบ: 0.8,0.9,130
+    """
     
-    div[data-testid="stTextArea"] textarea:focus {{
-        border-color: #ff5252 !important;
-        box-shadow: 0 0 10px rgba(255, 82, 82, 0.5) !important;
-    }}
+    try:
+        response = model.generate_content(prompt)
+        clean_text = response.text.replace('`', '').strip()
+        values = clean_text.split(',')
+        return float(values[0].strip()), float(values[1].strip()), float(values[2].strip())
+    except Exception as e:
+        return fallback_analyze_mood(text)
 
-    /* Flip Card */
-    .flip-card {{
-        background-color: transparent;
-        width: 100%;
-        height: 300px;
-        perspective: 1000px;
-        margin-bottom: 20px;
-    }}
-    .flip-card-inner {{
-        position: relative;
-        width: 100%;
-        height: 100%;
-        text-align: center;
-        transition: transform 0.6s;
-        transform-style: preserve-3d;
-        box-shadow: 0 4px 8px 0 rgba(0,0,0,0.5);
-        border-radius: 15px;
-    }}
-    .flip-card:hover .flip-card-inner {{
-        transform: rotateY(180deg);
-    }}
-    .flip-card-front, .flip-card-back {{
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        backface-visibility: hidden;
-        border-radius: 15px;
-    }}
-    .flip-card-front {{
-        background-color: #bbb;
-        color: black;
-    }}
-    .flip-card-front img {{
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        border-radius: 15px;
-    }}
-    .flip-card-back {{
-        background-color: #1DB954;
-        color: white;
-        transform: rotateY(180deg);
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-    }}
+def fallback_analyze_mood(text):
+    """ระบบสำรองหาก Gemini ขัดข้อง"""
+    text = text.lower()
+    if any(word in text for word in ["เศร้า", "เหงา", "อกหัก", "ดิ่ง"]): return 0.2, 0.2, 80.0
+    elif any(word in text for word in ["สนุก", "มันส์", "เต้น"]): return 0.8, 0.8, 130.0
+    return 0.5, 0.5, 100.0
 
-    /* Floating Player Box */
-    div[data-key="floating_player_box"],
-    div.st-key-floating_player_box,
-    div[class*="st-key-floating_player_box"],
-    div[data-testid="stVerticalBlock"]:has(> div > div > div.floating-marker) {{
-        position: fixed !important;
-        bottom: 25px !important;
-        right: 25px !important;
-        width: 350px !important;
-        max-width: calc(100vw - 40px) !important;
-        height: auto !important;
-        background: #121212 !important;
-        border: 1.5px solid #1DB954 !important;
-        border-radius: 16px !important;
-        padding: 12px 14px 10px 14px !important;
-        z-index: 999999 !important;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8) !important;
-    }}
+@st.cache_data(ttl=3600)
+def get_spotify_track_info(track_name, artist_name):
+    """ดึงรูปปก, ตัวอย่างเพลง (Audio Preview), และลิงก์ฟังเพลง"""
+    try:
+        query = f"{track_name} {artist_name}"
+        url = f"https://itunes.apple.com/search?term={requests.utils.quote(query)}&limit=1&entity=song"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('resultCount', 0) > 0:
+                track = data['results'][0]
+                img_url = track.get('artworkUrl100', '').replace('100x100bb', '300x300bb')
+                preview_url = track.get('previewUrl', None)
+                spot_url = track.get('trackViewUrl', None)
+                return img_url, preview_url, spot_url
+    except Exception:
+        pass
+    return None, None, None
 
-    div[data-key="floating_player_box"] div[data-testid="stVerticalBlock"],
-    div[class*="st-key-floating_player_box"] div[data-testid="stVerticalBlock"],
-    div[data-testid="stVerticalBlock"]:has(> div > div > div.floating-marker) div[data-testid="stVerticalBlock"] {{
-        gap: 0.3rem !important;
-    }}
+def save_feedback(mood, cluster, feedback_type):
+    try:
+        url = st.secrets.get("SHEETS_WEB_APP_URL", "")
+        if url:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            payload = {"timestamp": timestamp, "mood": mood, "cluster": str(cluster), "feedback": feedback_type}
+            requests.post(url, json=payload)
+    except Exception:
+        pass
 
-    div[data-key="floating_player_box"] div[data-testid="stAudio"],
-    div[class*="st-key-floating_player_box"] div[data-testid="stAudio"],
-    div[data-testid="stVerticalBlock"]:has(> div > div > div.floating-marker) div[data-testid="stAudio"] {{
-        margin: 2px 0px !important;
-        padding: 0px !important;
-    }}
+# --- ระบบ OAuth สำหรับ Spotify Playlist ---
+def get_spotify_oauth():
+    client_id = st.secrets.get("SPOTIPY_CLIENT_ID", "")
+    client_secret = st.secrets.get("SPOTIPY_CLIENT_SECRET", "")
+    redirect_uri = st.secrets.get("SPOTIPY_REDIRECT_URI", "")
+    
+    if not (client_id and client_secret and redirect_uri):
+        return None
+        
+    return SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope="playlist-modify-public playlist-modify-private",
+        show_dialog=True
+    )
 
-    div[data-key="floating_player_box"] audio,
-    div[class*="st-key-floating_player_box"] audio,
-    div[data-testid="stVerticalBlock"]:has(> div > div > div.floating-marker) audio {{
-        border-radius: 8px !important;
-        width: 100% !important;
-    }}
+def create_spotify_playlist_on_user_account(token_info, playlist_name, songs_df):
+    """สร้าง Playlist และเพิ่มเพลงลงในบัญชี Spotify ของผู้ใช้"""
+    try:
+        sp = spotipy.Spotify(auth=token_info['access_token'])
+        user_id = sp.current_user()["id"]
+        
+        # สร้าง Playlist ใหม่
+        playlist = sp.user_playlist_create(
+            user=user_id,
+            name=playlist_name,
+            public=True,
+            description="จัดทำโดย AI DJ Mood Matcher"
+        )
+        
+        # ค้นหา URI ของเพลงบน Spotify
+        track_uris = []
+        for _, row in songs_df.iterrows():
+            q = f"track:{row['track_name']} artist:{row['artists']}"
+            res = sp.search(q=q, type="track", limit=1)
+            tracks = res.get('tracks', {}).get('items', [])
+            if tracks:
+                track_uris.append(tracks[0]['uri'])
+            else:
+                q_fb = f"{row['track_name']} {row['artists']}"
+                res_fb = sp.search(q=q_fb, type="track", limit=1)
+                tracks_fb = res_fb.get('tracks', {}).get('items', [])
+                if tracks_fb:
+                    track_uris.append(tracks_fb[0]['uri'])
 
-    div[data-key="floating_player_box"] button,
-    div[class*="st-key-floating_player_box"] button,
-    div[data-testid="stVerticalBlock"]:has(> div > div > div.floating-marker) button {{
-        border-radius: 8px !important;
-    }}
-
-    @media (max-width: 768px) {{
-        div[data-key="floating_player_box"],
-        div[class*="st-key-floating_player_box"],
-        div[data-testid="stVerticalBlock"]:has(> div > div > div.floating-marker) {{
-            bottom: 15px !important;
-            right: 15px !important;
-            left: 15px !important;
-            width: calc(100vw - 30px) !important;
-        }}
-    }}
-</style>
-
-<!-- HTML Tag วิดีโอพื้นหลัง -->
-<video autoplay loop muted playsinline id="bg-video">
-    <source src="{BG_VIDEO_URL}" type="video/mp4">
-</video>
-
-<!-- JS ช่วยทะลวงลบสีพื้นหลังดำข้างใน iframe ของ Mic Recorder -->
-<script>
-(function fixMicIframeBg() {{
-    function cleanIframe() {{
-        var doc = window.parent ? window.parent.document : document;
-        var iframes = doc.querySelectorAll('iframe');
-        iframes.forEach(function(iframe) {{
-            try {{
-                var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
-                if (innerDoc) {{
-                    if (innerDoc.body) {{
-                        innerDoc.body.style.backgroundColor = 'transparent';
-                        innerDoc.body.style.background = 'transparent';
-                    }}
-                    if (innerDoc.documentElement) {{
-                        innerDoc.documentElement.style.backgroundColor = 'transparent';
-                        innerDoc.documentElement.style.background = 'transparent';
-                    }}
-                }}
-            }} catch(e) {{}}
-        }});
-    }}
-    cleanIframe();
-    setInterval(cleanIframe, 300);
-}})();
-</script>
-""", unsafe_allow_html=True)
+        if track_uris:
+            sp.playlist_add_items(playlist_id=playlist['id'], items=track_uris)
+            return playlist['external_urls']['spotify'], len(track_uris)
+        return None, 0
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการสร้าง Playlist: {e}")
+        return None, 0
 
 # ==========================================
-# 2. State Management
+# 5. ระบบความจำ (Session State & Spotify Auth Code)
 # ==========================================
-if 'playlist' not in st.session_state:
-    st.session_state.playlist = [] 
-if 'ai_message' not in st.session_state:
-    st.session_state.ai_message = "" 
-if 'current_preview_url' not in st.session_state:
-    st.session_state.current_preview_url = None 
-if 'current_track_name' not in st.session_state:
-    st.session_state.current_track_name = "" 
-if 'current_track_index' not in st.session_state:
-    st.session_state.current_track_index = 0
+if 'playlist_data' not in st.session_state:
+    st.session_state.playlist_data = None
+if 'feedback_submitted' not in st.session_state:
+    st.session_state.feedback_submitted = False
+if 'spotify_token' not in st.session_state:
+    st.session_state.spotify_token = None
+
+# ตรวจสอบว่าผู้ใช้ล็อกอิน Spotify กลับมาพร้อม Authorization Code หรือไม่
+sp_oauth = get_spotify_oauth()
+if sp_oauth and "code" in st.query_params:
+    try:
+        code = st.query_params["code"]
+        token_info = sp_oauth.get_access_token(code)
+        st.session_state.spotify_token = token_info
+        st.query_params.clear() # ล้าง query params หลังล็อกอินเสร็จ
+        st.success("🟢 เชื่อมต่อ Spotify เรียบร้อยแล้ว!")
+    except Exception as e:
+        st.error(f"ไม่สามารถรับ Token จาก Spotify ได้: {e}")
 
 # ==========================================
-# 3. Header ตรงกลาง
+# 6. ส่วน UI หน้าเว็บ (ไมโครโฟน + กล่องข้อความ + จำนวนเพลง)
 # ==========================================
-st.markdown("""
-<div class="main-header">
-    <h1>🎧 AI DJ Mood Matcher</h1>
-    <p>บอกความรู้สึกของคุณ แล้วให้ AI DJ คัดสรรบทเพลงพร้อมมุมมองเฉพาะคุณ</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown("### 🗣️ เล่าความรู้สึกของคุณ")
 
-# ==========================================
-# 4. Form Layout
-# ==========================================
-st.markdown('<div class="section-title">🎙️ เล่าความรู้สึกของคุณผ่านเสียงหรือพิมพ์ข้อความ</div>', unsafe_allow_html=True)
-
-# 1. ปุ่มพูดความรู้สึก (ไมโครโฟน)
+# ปุ่มกดพูด (แปลงเสียงเป็นข้อความ)
 text_from_mic = speech_to_text(
     language='th-TH', 
-    start_prompt="🎙️ กดเพื่อพูดความรู้สึก", 
-    stop_prompt="🛑 กดอีกครั้งเพื่อหยุด", 
+    start_prompt="🎙️ กดเพื่อพูด (พูดเสร็จให้กดซ้ำอีกรอบ)", 
+    stop_prompt="🛑 กำลังฟัง... (กดเพื่อหยุด)", 
     just_once=False,
     key='STT'
 )
 
-# 2. ช่องใส่ความรู้สึก
-st.markdown('<div class="input-label">ความรู้สึกของคุณ:</div>', unsafe_allow_html=True)
+# กล่องรับข้อความ
 default_text = text_from_mic if text_from_mic else ""
+mood_text = st.text_area("หรือพิมพ์ความรู้สึกที่นี่:", value=default_text, placeholder="เช่น วันนี้ฝนตก เหงาจังเลย...")
 
-mood_text = st.text_area(
-    "ความรู้สึกของคุณ:",
-    value=default_text,
-    placeholder="เช่น วันนี้เลิกงานแล้ว เหนื่อยมากๆ อยากหาเพลงชิลๆ ฟังผ่อนคลาย...",
-    height=100,
-    label_visibility="collapsed"
-)
+# ตัวเลือกจำนวนเพลง (5-15 เพลง ค่าเริ่มต้นคือ 5 เพลง)
+num_songs = st.slider("🎵 เลือกจำนวนเพลงที่ต้องการใน Playlist:", min_value=5, max_value=15, value=5, step=1)
 
-# 3. Slider เลือกจำนวนเพลง
-st.markdown('<div class="input-label">🎵 จำนวนเพลงที่ต้องการสุ่มจัด:</div>', unsafe_allow_html=True)
-num_songs = st.slider(
-    "จำนวนเพลงที่ต้องการสุ่มจัด:",
-    min_value=3,
-    max_value=12,
-    value=5,
-    label_visibility="collapsed"
-)
-
-# 4. ปุ่มจัดเพลงทันที
-if st.button("✨ ให้ AI DJ จัดเพลงให้ทันที", type="primary", use_container_width=True):
-    if mood_text:
-        with st.spinner("AI กำลังวิเคราะห์ความรู้สึกและค้นหาเพลง..."):
-            ai_result = get_playlist_from_ai(mood_text, num_songs)
-            
-            if ai_result:
-                st.session_state.ai_message = ai_result['encouragement']
-                valid_tracks = []
-                
-                for song in ai_result['songs']:
-                    try:
-                        track_info = search_spotify_track(song['title'], song['artist'])
-                    except:
-                        track_info = None
-
-                    img_url, preview_url, full_url = get_track_preview(song['title'], song['artist'])
-                    
-                    if not track_info:
-                        track_info = {
-                            'name': song['title'],
-                            'artist': song['artist'],
-                            'album_cover': img_url if img_url else "https://via.placeholder.com/500?text=No+Cover",
-                            'preview_url': preview_url,
-                            'spotify_url': full_url if full_url else "#"
-                        }
-                    else:
-                        if preview_url: track_info['preview_url'] = preview_url
-                        if img_url: track_info['album_cover'] = img_url
-                        if not track_info.get('spotify_url') and full_url: track_info['spotify_url'] = full_url
-                    
-                    if track_info:
-                        track_info['reason'] = song['reason']
-                        valid_tracks.append(track_info)
-                
-                st.session_state.playlist = valid_tracks
-                st.session_state.current_track_index = 0
+# ปุ่มประมวลผล
+if st.button("🎵 จัด Playlist ให้หน่อย", type="primary", use_container_width=True):
+    if not mood_text:
+        st.warning("กรุณาพิมพ์หรือพูดความรู้สึกของคุณก่อนครับ")
     else:
-        st.warning("⚠️ กรุณาพิมพ์หรือพูดความรู้สึกของคุณก่อนครับ")
-
-# ==========================================
-# 5. ส่วนแสดงผล Playlist
-# ==========================================
-if len(st.session_state.playlist) > 0:
-    st.success("🎉 จัดเพลย์ลิสต์เสร็จเรียบร้อย!")
-    st.markdown(f"### 💌 ข้อความจาก AI DJ:\n> *{st.session_state.ai_message}*")
-    st.divider()
-    
-    cols = st.columns(3)
-    for i, track_info in enumerate(st.session_state.playlist):
-        with cols[i % 3]:
-            st.markdown(f"""
-            <div class="flip-card">
-                <div class="flip-card-inner">
-                <div class="flip-card-front">
-                    <img src="{track_info['album_cover']}" alt="Cover">
-                </div>
-                <div class="flip-card-back">
-                    <h4>{track_info['name']}</h4>
-                    <p>{track_info['artist']}</p>
-                    <hr/>
-                    <p style="font-size: 0.9em; font-style: italic;">{track_info.get('reason', '')}</p>
-                </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        with st.spinner("DJ (Gemini) กำลังตีความความรู้สึกและวิเคราะห์รายเพลง..."):
+            t_energy, t_valence, t_tempo = analyze_mood_with_gemini(mood_text)
             
-            if track_info.get('preview_url'):
-                if st.button(f"▶️ ฟังตัวอย่าง", key=f"play_{i}", use_container_width=True):
-                    st.session_state.current_preview_url = track_info['preview_url']
-                    st.session_state.current_track_name = track_info['name']
-                    st.session_state.current_track_index = i
-                    st.rerun() 
-            else:
-                st.button("❌ ไม่มีตัวอย่าง", key=f"no_play_{i}", disabled=True, use_container_width=True)
+            user_features = [[0.5, t_energy, t_valence, t_tempo]]
+            scaled_input = scaler.transform(user_features)
+            predicted_cluster = kmeans.predict(scaled_input)[0]
             
-            st.link_button(
-                "🟢 เปิดฟังบน Spotify", 
-                track_info.get('spotify_url', '#'), 
-                use_container_width=True
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("📈 วิเคราะห์สถิติของ Playlist")
-    try:
-        fig = create_radar_chart(st.session_state.playlist)
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
-    except:
-        st.info("ไม่สามารถสร้างกราฟสถิติได้")
-
-# ==========================================
-# 6. Floating Player
-# ==========================================
-if st.session_state.current_preview_url and len(st.session_state.playlist) > 0:
-    with st.container(key="floating_player_box"):
-        st.markdown('<div class="floating-marker"></div>', unsafe_allow_html=True)
-        
-        curr_idx = st.session_state.get('current_track_index', 0)
-        total_songs = len(st.session_state.playlist)
-        
-        head_c1, head_c2 = st.columns([85, 15])
-        with head_c1:
-            st.markdown(
-                f"<div id='drag-handle' style='cursor: grab; user-select: none; color:#1DB954; font-weight:bold; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:2px 0;'>"
-                f"⋮⋮ 🎵 {st.session_state.current_track_name} <span style='color:#888; font-size:11px;'>({curr_idx + 1}/{total_songs})</span></div>",
-                unsafe_allow_html=True
-            )
-        with head_c2:
-            if st.button("✖", key="close_player", use_container_width=True):
-                st.session_state.current_preview_url = None
-                st.session_state.current_track_name = ""
-                st.rerun()
-
-        st.audio(st.session_state.current_preview_url, format="audio/mp3", autoplay=True)
-        
-        ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([1, 1, 1])
-        with ctrl_c1:
-            if st.button("⏮️ ก่อนหน้า", key="prev_track", use_container_width=True):
-                prev_idx = (curr_idx - 1) % total_songs
-                st.session_state.current_track_index = prev_idx
-                next_track = st.session_state.playlist[prev_idx]
-                st.session_state.current_preview_url = next_track.get('preview_url')
-                st.session_state.current_track_name = next_track.get('name')
-                st.rerun()
-        with ctrl_c2:
-            st.markdown("<div style='text-align:center; font-size:11px; color:#888; line-height:38px; font-weight:bold;'>AI DJ</div>", unsafe_allow_html=True)
-        with ctrl_c3:
-            if st.button("ถัดไป ⏭️", key="next_track", use_container_width=True):
-                next_idx = (curr_idx + 1) % total_songs
-                st.session_state.current_track_index = next_idx
-                next_track = st.session_state.playlist[next_idx]
-                st.session_state.current_preview_url = next_track.get('preview_url')
-                st.session_state.current_track_name = next_track.get('name')
-                st.rerun()
-
-    st.markdown("""
-    <script>
-    (function() {
-        function initDrag() {
-            var doc = window.parent ? window.parent.document : document;
+            cluster_songs = df_songs[df_songs['cluster_id'] == predicted_cluster]
+            sampled_songs = cluster_songs.sample(min(num_songs, len(cluster_songs)))
             
-            var player = doc.querySelector('div[data-key="floating_player_box"]') || 
-                         doc.querySelector('div[class*="st-key-floating_player_box"]') ||
-                         doc.querySelector('div[data-testid="stVerticalBlock"]:has(> div > div > div.floating-marker)');
+            song_list_str = "\n".join([f"- {row['track_name']} (ศิลปิน: {row['artists']})" for _, row in sampled_songs.iterrows()])
             
-            var handle = doc.querySelector('#drag-handle');
+            prompt_dj = f"""
+            คุณคือ 'DJ AI' ที่เข้าใจอารมณ์คนฟังอย่างลึกซึ้ง
+            ผู้ใช้บอกความรู้สึกว่า: '{mood_text}'
+            เพลงที่คัดเลือกมาให้ {len(sampled_songs)} เพลง ได้แก่:
+            {song_list_str}
+
+            จงตอบกลับเป็น JSON โครงสร้างตามนี้เท่านั้น:
+            {{
+              "dj_text": "ข้อความทักทายภาพรวมสั้นๆ ภาษาไทย เป็นกันเอง",
+              "reasons": {{
+                "ชื่อเพลงเป๊ะๆ ตามลิสต์": "เหตุผลสั้นๆ 1-2 ประโยคภาษาไทย ว่าทำไมเพลงนี้ถึงเข้ากับอารมณ์นี้และเพลงเป็นสไตล์ไหน"
+              }}
+            }}
+            """
             
-            if (!player || !handle) {
-                setTimeout(initDrag, 200);
-                return;
-            }
-
-            if (handle.getAttribute('data-drag-attached') === 'true') return;
-            handle.setAttribute('data-drag-attached', 'true');
-
-            var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-
-            handle.onmousedown = function(e) {
-                e = e || window.event;
-                e.preventDefault();
+            try:
+                # 🌟 บังคับ Gemini ส่งเฉพาะ JSON ล็อกโครงสร้างไว้ ไม่ให้ติด Error
+                response = model.generate_content(
+                    prompt_dj,
+                    generation_config={"response_mime_type": "application/json"}
+                )
+                dj_data = json.loads(response.text)
                 
-                pos3 = e.clientX;
-                pos4 = e.clientY;
+                dj_response = dj_data.get("dj_text", "จัดเพลงตามอารมณ์มาให้แล้วครับ!")
+                song_reasons = dj_data.get("reasons", {})
+            except Exception as e:
+                dj_response = f"(ระบบ Gemini ขัดข้อง: {e})"
+                song_reasons = {}
 
-                var rect = player.getBoundingClientRect();
+            st.session_state.playlist_data = {
+                "mood": mood_text,
+                "cluster": predicted_cluster,
+                "dj_text": dj_response,
+                "song_reasons": song_reasons,
+                "sampled_songs": sampled_songs,
+                "features": {"energy": t_energy, "valence": t_valence, "tempo": t_tempo}
+            }
+            st.session_state.feedback_submitted = False
 
-                doc.onmouseup = function() {
-                    doc.onmouseup = null;
-                    doc.onmousemove = null;
-                };
+# ==========================================
+# 7. ส่วนแสดงผลลัพธ์ & ปุ่มส่งเข้า Spotify
+# ==========================================
+if st.session_state.playlist_data:
+    data = st.session_state.playlist_data
+    
+    st.success(f"จัดเพลงเสร็จเรียบร้อย! ได้รับทั้งหมด {len(data['sampled_songs'])} เพลง")
+    st.markdown("### 💬 ข้อความจาก DJ AI (Powered by Google Gemini)")
+    st.info(data["dj_text"])
 
-                doc.onmousemove = function(e) {
-                    e = e || window.event;
-                    e.preventDefault();
+    # ----------------------------------------
+    # 🟢 ปุ่มสร้าง Playlist เข้าสู่ Spotify ของผู้ใช้
+    # ----------------------------------------
+    st.markdown("---")
+    st.markdown("### 🟢 สร้าง Playlist นี้บน Spotify ของคุณ")
+    
+    if not sp_oauth:
+        st.warning("⚠️ ยังไม่ได้ตั้งค่า SPOTIPY Credentials ใน Streamlit Secrets")
+    else:
+        if not st.session_state.spotify_token:
+            auth_url = sp_oauth.get_authorize_url()
+            st.markdown(f"[👉 คลิกที่นี่เพื่อล็อกอิน Spotify และอนุญาตการสร้าง Playlist]({auth_url})")
+        else:
+            playlist_name_input = st.text_input("ชื่อ Playlist บน Spotify:", value=f"AI DJ Mood: {data['mood'][:20]}")
+            if st.button("➕ บันทึก Playlist ลง Spotify ทันที", type="primary"):
+                with st.spinner("กำลังสร้าง Playlist และเพิ่มเพลงเข้าสู่ Spotify ของคุณ..."):
+                    sp_url, added_count = create_spotify_playlist_on_user_account(
+                        st.session_state.spotify_token,
+                        playlist_name_input,
+                        data["sampled_songs"]
+                    )
+                    if sp_url:
+                        st.balloons()
+                        st.success(f"🎉 สร้าง Playlist สำเร็จ! เพิ่มเพลงสำเร็จ {added_count} เพลง")
+                        st.markdown(f"👉 [🎧 คลิกที่นี่เพื่อเปิดฟัง Playlist บน Spotify ของคุณ]({sp_url})")
 
-                    pos1 = pos3 - e.clientX;
-                    pos2 = pos4 - e.clientY;
-                    pos3 = e.clientX;
-                    pos4 = e.clientY;
+    st.markdown("---")
+    st.markdown(f"### 🎼 รายชื่อเพลงแนะนำ (กลุ่มดนตรีที่ {data['cluster']})")
 
-                    rect = player.getBoundingClientRect();
+    # วนลูปแสดงเพลงทีละบรรทัด พร้อมรูปปก และคำอธิบายจาก Gemini 🌟
+    for _, row in data["sampled_songs"].iterrows():
+        track_name = row['track_name']
+        artist_name = row['artists']
+        
+        # ดึงข้อมูลจาก Spotify / Store
+        img_url, preview_url, spot_url = get_spotify_track_info(track_name, artist_name)
+        
+        # แบ่งหน้าจอเป็น 2 คอลัมน์
+        col1, col2 = st.columns([1, 4])
+        
+        with col1:
+            if img_url:
+                st.image(img_url, width=120)
+            else:
+                st.write("💿 No Image")
+                
+        with col2:
+            st.subheader(track_name)
+            st.write(f"🎤 **ศิลปิน:** {artist_name}")
+            
+            # คำอธิบายจาก Gemini แยกตามเพลง
+            reason = data["song_reasons"].get(track_name, None)
+            if reason:
+                st.caption(f"💡 **ทำไม DJ ถึงเลือกเพลงนี้:** {reason}")
+            
+            if spot_url:
+                st.markdown(f"[🎧 ฟังเพลงเต็มคลิกที่นี่]({spot_url})")
+            if preview_url:
+                st.audio(preview_url, format="audio/mp3")
+                
+        st.divider() # เส้นคั่นแต่ละเพลง
 
-                    player.style.position = 'fixed';
-                    player.style.top = (rect.top - pos2) + 'px';
-                    player.style.left = (rect.left - pos1) + 'px';
-                    player.style.bottom = 'auto';
-                    player.style.right = 'auto';
-                    player.style.margin = '0';
-                };
-            };
-        }
+    # ----------------------------------------
+    # กราฟ Radar Chart
+    # ----------------------------------------
+    f_energy = data["features"]["energy"]
+    f_valence = data["features"]["valence"]
+    f_tempo_scaled = data["features"]["tempo"] / 200.0
 
-        initDrag();
-        setTimeout(initDrag, 500);
-    })();
-    </script>
-    """, unsafe_allow_html=True)
+    categories = ['ความมันส์ (Energy)', 'ความสดใส (Valence)', 'ความเร็ว (Tempo)']
+    values = [f_energy, f_valence, f_tempo_scaled]
+    categories.append(categories[0]) 
+    values.append(values[0])
+
+    fig = go.Figure(data=go.Scatterpolar(
+        r=values, theta=categories, fill='toself', fillcolor='rgba(29, 185, 84, 0.5)', line_color='#1DB954'
+    ))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=False, title="📊 ระดับอารมณ์ที่คุณต้องการ (วิเคราะห์โดย AI)")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ----------------------------------------
+    # ระบบ Feedback
+    # ----------------------------------------
+    st.markdown("---")
+    st.markdown("### 📝 คุณชอบ Playlist นี้ไหม?")
+    
+    if not st.session_state.feedback_submitted:
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("👍 โดนใจสุดๆ", use_container_width=True):
+                save_feedback(data["mood"], data["cluster"], "Like")
+                st.session_state.feedback_submitted = True
+                st.rerun()
+        with col2:
+            if st.button("👎 ไม่ค่อยเข้ากัน", use_container_width=True):
+                save_feedback(data["mood"], data["cluster"], "Dislike")
+                st.session_state.feedback_submitted = True
+                st.rerun()
+    else:
+        st.success("💖 ขอบคุณสำหรับเสียงตอบรับครับ! ข้อมูลถูกบันทึกลงฐานข้อมูลเรียบร้อยแล้ว")
