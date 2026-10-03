@@ -6,10 +6,9 @@ import google.generativeai as genai
 import requests
 import json
 import re
-import textwrap
 
 # ==========================================
-# 1. Page Config & CSS Injection
+# 1. Page Config & Global CSS
 # ==========================================
 st.set_page_config(
     page_title="quietpress -- vinyl record label",
@@ -18,12 +17,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Style & Animation Declarations
-st.markdown(textwrap.dedent("""
+# Helper Function: คลีนช่องว่างหน้าบรรทัด 100% ป้องกัน Streamlit แสดงผลเป็น Code Block
+def render_html(html_str):
+    cleaned = "\n".join([line.strip() for line in html_str.split("\n")])
+    st.markdown(cleaned, unsafe_allow_html=True)
+
+# Custom Style Sheet
+render_html("""
 <link rel="stylesheet" href="https://db.onlinewebfonts.com/c/a64ff11d2c24584c767f6257e880dc65?family=Helvetica+Regular">
 
 <style>
-    /* Fullscreen Viewport Clean Up */
+    /* Fullscreen Viewport Setup */
     #MainMenu, footer, header {visibility: hidden;}
     .block-container {
         padding: 1rem 2rem !important;
@@ -57,11 +61,11 @@ st.markdown(textwrap.dedent("""
         object-fit: cover;
     }
 
-    /* Glassmorphism Styling */
+    /* Glassmorphic UI */
     .liquid-glass {
-        background: rgba(255, 255, 255, 0.04);
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
         border: 1px solid rgba(255, 255, 255, 0.15);
         box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         border-radius: 16px;
@@ -69,23 +73,19 @@ st.markdown(textwrap.dedent("""
 
     /* Animations */
     @keyframes fadeUp {
-        from { opacity: 0; transform: translateY(15px); }
+        from { opacity: 0; transform: translateY(12px); }
         to { opacity: 1; transform: translateY(0); }
     }
     .animate-fade-up {
-        animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        animation: fadeUp 0.5s ease-out forwards;
     }
 
     @keyframes rotateVinyl {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
     }
-    .vinyl-spin {
-        animation: rotateVinyl 6s linear infinite;
-    }
-    .vinyl-pause {
-        animation-play-state: paused;
-    }
+    .vinyl-spin { animation: rotateVinyl 6s linear infinite; }
+    .vinyl-pause { animation-play-state: paused; }
 
     @keyframes equalBlink {
         0%, 100% { height: 3px; }
@@ -103,23 +103,22 @@ st.markdown(textwrap.dedent("""
     .eq-bar:nth-child(3) { animation-delay: 0.2s; }
     .eq-bar:nth-child(4) { animation-delay: 0.4s; }
 
-    /* Compact Input Box Customization */
+    /* Compact Form Inputs */
     .stTextInput input {
-        background: rgba(255, 255, 255, 0.07) !important;
+        background: rgba(255, 255, 255, 0.08) !important;
         border: 1px solid rgba(255, 255, 255, 0.2) !important;
         color: white !important;
         border-radius: 10px !important;
         font-size: 0.85rem !important;
-        height: 40px !important;
+        height: 38px !important;
     }
     .stButton button {
         border-radius: 10px !important;
-        font-size: 0.85rem !important;
-        transition: all 0.2s ease !important;
+        font-size: 0.82rem !important;
     }
 </style>
 
-<!-- Background Boomerang Video Overlay -->
+<!-- Background Overlay Video -->
 <div class="bg-video-container">
     <video id="bgVid" autoplay muted playsinline crossorigin="anonymous">
         <source src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260611_183632_c311af08-e4b7-458f-81e7-79847a49b3d3.mp4" type="video/mp4">
@@ -165,10 +164,10 @@ st.markdown(textwrap.dedent("""
         vid.addEventListener('play', () => requestAnimationFrame(grab));
     }
 </script>
-"""), unsafe_allow_html=True)
+""")
 
 # ==========================================
-# 2. Gemini API & ML Model Initialization
+# 2. Gemini API & ML Initialization
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
@@ -245,24 +244,24 @@ if 'playlist' not in st.session_state:
 header_left, header_mid, header_right = st.columns([2, 5, 2])
 
 with header_left:
-    st.markdown(textwrap.dedent("""
+    render_html("""
         <div style="display:flex; align-items:center; gap:8px;">
             <svg width="18" height="18" viewBox="0 0 256 256" fill="white">
                 <path d="M 256 256 L 128 256 C 198.692 256 256 198.692 256 128 C 256 57.308 198.692 0 128 0 C 57.308 0 0 57.308 0 128 C 0 198.692 57.308 256 128 256 L 0 256 L 0 0 L 256 0 Z M 128 104 C 141.255 104 152 114.745 152 128 C 152 141.255 141.255 152 128 152 C 114.745 152 104 141.255 104 128 C 104 114.745 114.745 104 128 104 Z" />
             </svg>
             <span style="font-size:1rem; font-weight:500;">quietpress</span>
         </div>
-    """), unsafe_allow_html=True)
+    """)
 
 with header_mid:
-    st.markdown(textwrap.dedent("""
+    render_html("""
         <div style="display:flex; justify-content:center; gap:25px; font-size:0.85rem; color:rgba(255,255,255,0.8);">
             <span>Anthology</span>
             <span>Talents</span>
             <span>Sound diary</span>
             <span>Playback salon</span>
         </div>
-    """), unsafe_allow_html=True)
+    """)
 
 with header_right:
     if st.button(f"🛒 Cart ({st.session_state.cart_count})", key="cart_btn"):
@@ -270,27 +269,27 @@ with header_right:
         st.rerun()
 
 # ==========================================
-# 5. Main Content Area (Left Compact Layout)
+# 5. Left Hero & Search Section
 # ==========================================
 left_col, right_col = st.columns([1.2, 1])
 
 with left_col:
-    st.markdown(textwrap.dedent("""
-        <div style="padding-top: 25px;" class="animate-fade-up">
-            <div style="display:inline-block; padding: 4px 12px; background: rgba(255,255,255,0.12); border-radius: 6px; font-size:0.75rem; margin-bottom: 12px;">
+    render_html("""
+        <div style="padding-top: 15px;" class="animate-fade-up">
+            <div style="display:inline-block; padding: 4px 12px; background: rgba(255,255,255,0.12); border-radius: 6px; font-size:0.75rem; margin-bottom: 10px;">
                 Press 04 . Vernal woods
             </div>
-            <h1 style="font-size: 3.2rem; font-weight: 400; line-height: 1.1; margin-bottom: 12px;">
+            <h1 style="font-size: 3rem; font-weight: 400; line-height: 1.1; margin-bottom: 10px;">
                 records cut for the<br>calm listener.
             </h1>
-            <p style="font-size: 0.92rem; color: rgba(255,255,255,0.8); max-width: 380px; line-height: 1.5; margin-bottom: 20px;">
+            <p style="font-size: 0.9rem; color: rgba(255,255,255,0.8); max-width: 360px; line-height: 1.4; margin-bottom: 15px;">
                 Drone, roots, and nature-captured sound on wax LPs. Every disc cut just once, snag it or miss.
             </p>
         </div>
-    """), unsafe_allow_html=True)
+    """)
 
-    # 🔹 ข้อ 2: Compact AI Mood Input Section (ย่อส่วนพิมพ์ให้สวยงามไม่รก)
-    st.markdown("<div style='max-width: 420px;' class='liquid-glass p-3 mb-3'>", unsafe_allow_html=True)
+    # Compact Input Box
+    render_html("<div style='max-width: 380px;' class='liquid-glass p-3 mb-2'>")
     
     m_col1, m_col2 = st.columns([2.5, 1])
     with m_col1:
@@ -308,9 +307,9 @@ with left_col:
             st.session_state.current_track_idx = (st.session_state.current_track_idx + 1) % len(st.session_state.playlist)
             st.rerun()
             
-    st.markdown("</div>", unsafe_allow_html=True)
+    render_html("</div>")
 
-# AI DJ Logic Process
+# AI DJ Search Execution
 if search_trigger and mood_query:
     with st.spinner("🎧 AI DJ กำลังจัดรายการ..."):
         e, v, t = 0.3, 0.4, 80.0
@@ -348,61 +347,61 @@ if search_trigger and mood_query:
                 pass
 
 # ==========================================
-# 6. 🔹 ข้อ 3: Bottom-Right Player Widget (ย้ายมาขวาล่าง)
+# 6. Bottom-Right Floating Player Widget (แก้ไขเรื่องการล้นหน้าจอ)
 # ==========================================
 curr_track = st.session_state.playlist[st.session_state.current_track_idx]
 
 with right_col:
-    # เพิ่ม Padding เพื่อดัน Player ลงมาจัดวางที่มุมขวาล่าง
-    st.markdown("<div style='padding-top: 140px; max-width: 340px; margin-left: auto;' class='animate-fade-up'>", unsafe_allow_html=True)
+    # ปรับ margin-top ให้พอดี ไม่ดันจนล้นขอบล่าง
+    render_html("<div style='margin-top: 25px; max-width: 330px; margin-left: auto; word-break: break-word;' class='animate-fade-up'>")
     
-    # 🔹 ข้อ 1: แก้ไข AI DJ Card ไม่ให้มีแท็ก </div> โผล่มาเป็นข้อความ
+    # 1. AI DJ Card (คลีน HTML ป้องกันซอร์สโค้ดโผล่)
     eq_html = '<div style="display:flex; align-items:flex-end; height:12px;"><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span></div>' if st.session_state.is_playing else ''
     
-    dj_card_html = textwrap.dedent(f"""
-        <div class="liquid-glass" style="padding: 10px 14px; margin-bottom: 8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <span style="font-size:0.65rem; font-weight:bold; color:#93c5fd; text-transform:uppercase;">🤖 AI DJ PERSPECTIVE</span>
-                {eq_html}
-            </div>
-            <div style="font-size:0.78rem; color:rgba(255,255,255,0.85); line-height:1.3;">
-                "{curr_track['reason']}"
-            </div>
+    dj_card = f"""
+    <div class="liquid-glass" style="padding: 10px 12px; margin-bottom: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span style="font-size:0.65rem; font-weight:bold; color:#93c5fd; text-transform:uppercase;">🤖 AI DJ PERSPECTIVE</span>
+            {eq_html}
         </div>
-    """)
-    st.markdown(dj_card_html, unsafe_allow_html=True)
+        <div style="font-size:0.75rem; color:rgba(255,255,255,0.85); line-height:1.3; overflow-wrap: break-word;">
+            "{curr_track['reason']}"
+        </div>
+    </div>
+    """
+    render_html(dj_card)
 
-    # 3D Vinyl Album Track Card
+    # 2. Track Card (การ์ดเพลงและแผ่นเสียง 3D)
     spin_class = "vinyl-spin" if st.session_state.is_playing else "vinyl-spin vinyl-pause"
-    track_card_html = textwrap.dedent(f"""
-        <div style="background:white; border-radius: 14px; padding: 10px; color:#111827; box-shadow: 0 10px 25px rgba(0,0,0,0.5); margin-bottom: 8px;">
-            <div style="display:flex; align-items:center; gap: 10px;">
-                <div style="position:relative; width: 42px; height: 42px; flex-shrink:0;">
-                    <div class="{spin_class}" style="position:absolute; right:-6px; width: 38px; height: 38px; border-radius:50%; background:#171717; border: 1px solid #404040; display:flex; align-items:center; justify-content:center;">
-                        <div style="width: 12px; height: 12px; border-radius:50%; background:#1d4ed8;"></div>
-                    </div>
-                    <img src="{curr_track['img']}" style="position:relative; z-index:2; width: 42px; height: 42px; border-radius:8px; object-fit:cover;" />
+    track_card = f"""
+    <div style="background:white; border-radius: 12px; padding: 10px; color:#111827; box-shadow: 0 10px 25px rgba(0,0,0,0.4); margin-bottom: 8px;">
+        <div style="display:flex; align-items:center; gap: 10px;">
+            <div style="position:relative; width: 40px; height: 40px; flex-shrink:0;">
+                <div class="{spin_class}" style="position:absolute; right:-5px; width: 36px; height: 36px; border-radius:50%; background:#171717; border: 1px solid #404040; display:flex; align-items:center; justify-content:center;">
+                    <div style="width: 10px; height: 10px; border-radius:50%; background:#1d4ed8;"></div>
                 </div>
-                <div style="flex:1; min-width:0;">
-                    <span style="font-size: 0.6rem; font-weight:bold; color:#1d4ed8; background:#eff6ff; padding: 1px 5px; border-radius: 4px;">
-                        {curr_track['tag']}
-                    </span>
-                    <div style="font-size:0.8rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px;">
-                        {curr_track['artist']} -- {curr_track['title']}
+                <img src="{curr_track['img']}" style="position:relative; z-index:2; width: 40px; height: 40px; border-radius:6px; object-fit:cover;" />
+            </div>
+            <div style="flex:1; min-width:0;">
+                <span style="font-size: 0.58rem; font-weight:bold; color:#1d4ed8; background:#eff6ff; padding: 1px 4px; border-radius: 3px;">
+                    {curr_track['tag']}
+                </span>
+                <div style="font-size:0.78rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px;">
+                    {curr_track['artist']} -- {curr_track['title']}
+                </div>
+                <div style="display:flex; align-items:center; gap: 6px; margin-top: 3px;">
+                    <div style="flex:1; height:3px; background:#e5e7eb; border-radius:2px; overflow:hidden;">
+                        <div style="height:100%; width:{'70%' if st.session_state.is_playing else '30%'}; background:#1d4ed8;"></div>
                     </div>
-                    <div style="display:flex; align-items:center; gap: 6px; margin-top: 4px;">
-                        <div style="flex:1; height:3px; background:#e5e7eb; border-radius:2px; overflow:hidden;">
-                            <div style="height:100%; width:{'70%' if st.session_state.is_playing else '30%'}; background:#1d4ed8;"></div>
-                        </div>
-                        <span style="font-size: 0.6rem; color:#6b7280; font-family:monospace;">0:33 / -1:21</span>
-                    </div>
+                    <span style="font-size: 0.58rem; color:#6b7280; font-family:monospace;">0:33 / -1:21</span>
                 </div>
             </div>
         </div>
-    """)
-    st.markdown(track_card_html, unsafe_allow_html=True)
+    </div>
+    """
+    render_html(track_card)
 
-    # Playback Controls
+    # 3. Playback Control Buttons
     ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1, 1, 1, 1])
     with ctrl1:
         if st.button("⏮ Prev", use_container_width=True):
@@ -426,10 +425,10 @@ with right_col:
     if st.session_state.is_playing and curr_track.get('preview'):
         st.audio(curr_track['preview'], autoplay=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    render_html("</div>")
 
 # ==========================================
-# 7. Radar Chart Audio Spectrum Expander
+# 7. Audio Spectrum Radar Chart Expander
 # ==========================================
 with st.expander("📊 ดูค่าวิเคราะห์องค์ประกอบเสียง (Audio Spectrum Radar)"):
     r_col1, r_col2 = st.columns([2, 1])
@@ -445,7 +444,7 @@ with st.expander("📊 ดูค่าวิเคราะห์องค์ป
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
             showlegend=False,
-            height=220,
+            height=200,
             margin=dict(l=20, r=20, t=10, b=10),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
