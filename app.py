@@ -63,8 +63,7 @@ def get_spotify_track_info(track_name, artist_name):
         return None, None, None
         
     except Exception as e:
-        # ถ้ามี Error จาก Spotify (เช่น ค้นหาคำแปลกๆ หรือ API มีปัญหา) ให้ข้ามไปเลย แอปจะได้ไม่พัง
-        print(f"Spotify API Error: {e}") 
+        st.error(f"เกิดข้อผิดพลาดจาก Spotify: {e}") # บรรทัดนี้จะโชว์ Error สีแดงบนหน้าเว็บ
         return None, None, None
 
 # 5. UI หน้าเว็บ
