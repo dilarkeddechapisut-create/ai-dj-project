@@ -7,222 +7,42 @@ import requests
 import json
 import re
 from datetime import datetime
-from streamlit_mic_recorder import speech_to_text
+
+# รองรับ Speech-to-Text หากมีไลบรารี
+try:
+    from streamlit_mic_recorder import speech_to_text
+    HAS_MIC = True
+except ImportError:
+    HAS_MIC = False
 
 # ==========================================
-# 1. ตั้งค่าหน้าเว็บ + Custom CSS & Animations
+# 1. ตั้งค่าหน้าเว็บแบบ Fullscreen Viewport
 # ==========================================
 st.set_page_config(
-    page_title="AI DJ Mood Matcher", 
-    page_icon="🎧",
-    layout="centered"
+    page_title="quietpress -- vinyl record label", 
+    page_icon="💿",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# ตกแต่ง CSS และ อนิเมชันเต็มรูปแบบ
+# ซ่อน UI ดั้งเดิมของ Streamlit ทั้งหมดเพื่อให้แสดงผลแบบ Fullscreen Single Viewport
 st.markdown("""
 <style>
-    /* ซ่อน Header / Footer ดั้งเดิม */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* Keyframe Animations */
-    @keyframes fadeInUp {
-        from { opacity: 0; transform: translateY(25px) scale(0.97); }
-        to { opacity: 1; transform: translateY(0) scale(1); }
+    header {visibility: hidden;}
+    .block-container {
+        padding: 0 !important;
+        margin: 0 !important;
+        max-width: 100% !important;
     }
-
-    @keyframes pulseGlow {
-        0% { box-shadow: 0 0 12px rgba(0, 242, 254, 0.2); }
-        50% { box-shadow: 0 0 28px rgba(0, 242, 254, 0.55), 0 0 10px rgba(155, 81, 224, 0.4); }
-        100% { box-shadow: 0 0 12px rgba(0, 242, 254, 0.2); }
-    }
-
-    @keyframes rotateVinyl {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-    }
-
-    @keyframes floatHeader {
-        0% { transform: translateY(0px); }
-        50% { transform: translateY(-5px); }
-        100% { transform: translateY(0px); }
-    }
-
-    @keyframes equalBlink {
-        0%, 100% { height: 4px; }
-        50% { height: 18px; }
-    }
-
-    /* หัวข้อหลักแบบ Gradient & Floating */
-    .gradient-header {
-        background: linear-gradient(135deg, #00F2FE 0%, #4FACFE 50%, #9B51E0 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.7rem;
-        font-weight: 800;
-        text-align: center;
-        margin-bottom: 5px;
-        animation: floatHeader 4s ease-in-out infinite;
-    }
-    .sub-title {
-        text-align: center;
-        color: #A0AEC0;
-        font-size: 1.05rem;
-        margin-bottom: 25px;
-    }
-
-    /* กล่องข้อความจาก DJ AI */
-    .dj-speech-box {
-        background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.75) 100%);
-        border: 1px solid rgba(0, 242, 254, 0.35);
-        border-radius: 20px;
-        padding: 22px;
-        margin-bottom: 25px;
-        backdrop-filter: blur(12px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-        animation: fadeInUp 0.5s ease-out;
-    }
-    .dj-badge {
-        background: linear-gradient(90deg, #00F2FE, #4FACFE);
-        color: #0F172A;
-        font-weight: 800;
-        padding: 5px 14px;
-        border-radius: 20px;
-        font-size: 0.82rem;
-        display: inline-block;
-    }
-
-    /* Animated Equalizer Bars */
-    .eq-container {
-        display: inline-flex;
-        align-items: flex-end;
-        height: 18px;
-        margin-left: 10px;
-        vertical-align: middle;
-    }
-    .eq-bar {
-        width: 3.5px;
-        margin: 0 2px;
-        background: linear-gradient(to top, #00F2FE, #9B51E0);
-        border-radius: 3px;
-        animation: equalBlink 1.1s ease-in-out infinite alternate;
-    }
-    .eq-bar:nth-child(1) { animation-delay: 0.1s; }
-    .eq-bar:nth-child(2) { animation-delay: 0.4s; }
-    .eq-bar:nth-child(3) { animation-delay: 0.2s; }
-    .eq-bar:nth-child(4) { animation-delay: 0.5s; }
-
-    /* การ์ดเพลงหลักสไตล์ Animated Glassmorphism */
-    .song-card-animated {
-        background: rgba(30, 41, 59, 0.75);
-        border: 1px solid rgba(0, 242, 254, 0.25);
-        border-radius: 22px;
-        padding: 24px;
-        box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(14px);
-        margin-top: 10px;
-        margin-bottom: 15px;
-        animation: fadeInUp 0.45s ease-out;
-        transition: all 0.3s ease;
-    }
-    .song-card-animated:hover {
-        border-color: rgba(0, 242, 254, 0.6);
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 242, 254, 0.2);
-    }
-
-    /* แฮชแท็กอารมณ์เรืองแสง */
-    .mood-tag-badge {
-        background: linear-gradient(90deg, #9B51E0, #00F2FE);
-        color: #FFFFFF;
-        font-size: 0.82rem;
-        font-weight: 700;
-        padding: 4px 14px;
-        border-radius: 14px;
-        display: inline-block;
-        margin-bottom: 12px;
-        animation: pulseGlow 2.5s infinite;
-    }
-
-    .reason-box {
-        background: rgba(15, 23, 42, 0.7);
-        border-left: 4px solid #00F2FE;
-        border-radius: 10px;
-        padding: 14px 18px;
-        margin-top: 12px;
-        font-size: 0.95rem;
-        color: #F1F5F9;
-        line-height: 1.5;
-    }
-
-    /* แผ่นเสียงหมุน 3D (Vinyl Disk Component) */
-    .album-art-wrapper {
-        position: relative;
-        width: 210px;
-        height: 210px;
-        margin: 0 auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .vinyl-disk {
-        position: absolute;
-        right: -18px;
-        width: 180px;
-        height: 180px;
-        border-radius: 50%;
-        background: radial-gradient(circle, #111 18%, #222 19%, #000 35%, #181818 50%, #000 70%, #222 100%);
-        box-shadow: 0 0 15px rgba(0, 0, 0, 0.8), inset 0 0 8px rgba(255, 255, 255, 0.25);
-        animation: rotateVinyl 8s linear infinite;
-        z-index: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .vinyl-center {
-        width: 55px;
-        height: 55px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, #00F2FE, #9B51E0);
-        border: 3px solid #111;
-    }
-    .album-cover-img {
-        position: relative;
-        z-index: 2;
-        width: 190px;
-        height: 190px;
-        object-fit: cover;
-        border-radius: 16px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.65);
-        transition: transform 0.3s ease;
-    }
-    .album-cover-img:hover {
-        transform: scale(1.03) rotate(-1deg);
-    }
-    .album-cover-placeholder {
-        position: relative;
-        z-index: 2;
-        width: 190px;
-        height: 190px;
-        border-radius: 16px;
-        background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
-        border: 1px solid rgba(0, 242, 254, 0.3);
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.65);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 15px;
-        text-align: center;
-    }
+    div[data-testid="stToolbar"] {display: none;}
+    section[data-testid="stSidebar"] {display: none;}
 </style>
 """, unsafe_allow_html=True)
 
-# Header
-st.markdown('<div class="gradient-header">🎧 AI DJ Mood Matcher</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">บอกความรู้สึกของคุณ แล้วให้ AI DJ คัดสรรบทเพลงพร้อมมุมมองเฉพาะคุณ</div>', unsafe_allow_html=True)
-
 # ==========================================
-# 2. ตั้งค่าการเชื่อมต่อ API (Gemini & Secrets)
+# 2. เชื่อมต่อ API (Gemini & Secrets)
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
@@ -235,52 +55,36 @@ except Exception:
     model = None
 
 # ==========================================
-# 3. โหลดโมเดล Machine Learning
+# 3. โหลดโมเดล Machine Learning (มี Fallback หากไม่มีไฟล์)
 # ==========================================
 @st.cache_resource
 def load_models():
-    km = joblib.load('kmeans_model.pkl')
-    sc = joblib.load('scaler.pkl')
-    df = pd.read_csv('spotify_clustered.csv')
-    return km, sc, df
+    try:
+        km = joblib.load('kmeans_model.pkl')
+        sc = joblib.load('scaler.pkl')
+        df = pd.read_csv('spotify_clustered.csv')
+        return km, sc, df
+    except Exception:
+        return None, None, None
 
-try:
-    kmeans, scaler, df_songs = load_models()
-except Exception:
-    st.error("🚨 ไม่พบไฟล์โมเดล .pkl หรือ .csv กรุณาอัปโหลดขึ้น GitHub ให้ครบ")
-    st.stop()
+kmeans, scaler, df_songs = load_models()
 
 # ==========================================
-# 4. ฟังก์ชันประมวลผลข้อมูล
+# 4. ฟังก์ชันประมวลผลข้อมูล & ค้นหาเพลง
 # ==========================================
-def clean_json_string(text):
-    """คลีนข้อความจาก Gemini ให้เป็น JSON สตริงบริสุทธิ์"""
-    if not text:
-        return ""
-    clean_text = text.strip()
-    if clean_text.startswith("```"):
-        lines = clean_text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        clean_text = "\n".join(lines).strip()
-    return clean_text
-
 def analyze_mood_with_gemini(text):
-    """แปลงความรู้สึกเป็นค่า Energy, Valence, Tempo"""
+    """วิเคราะห์ความรู้สึกเป็นค่า Energy, Valence, Tempo"""
     if not model:
         return fallback_analyze_mood(text)
         
     prompt = f"""
-    คุณคือนักจิตวิทยาทางดนตรี จงวิเคราะห์ข้อความต่อไปนี้แล้วแปลงเป็นค่าทางดนตรี 3 ค่า
-    1. Energy (0.0 ถึง 1.0): 0 คือสงบ/อ่อนล้า, 1 คือมันส์/พลังงานล้น
-    2. Valence (0.0 ถึง 1.0): 0 คือเศร้า/หดหู่/โกรธ, 1 คือมีความสุข/สดใส
+    คุณคือ AI DJ นักจิตวิทยาทางดนตรี จงวิเคราะห์ข้อความต่อไปนี้แล้วแปลงเป็นค่าทางดนตรี 3 ค่า
+    1. Energy (0.0 ถึง 1.0): 0 คือสงบ/อ่อนล้า, 1 คือสนุก/พลังงานสูง
+    2. Valence (0.0 ถึง 1.0): 0 คือเศร้า/ลึกซึ้ง, 1 คือมีความสุข/สดใส
     3. Tempo (60.0 ถึง 200.0): ความเร็วของเพลง (BPM)
 
     ข้อความผู้ใช้: "{text}"
-
-    ตอบกลับเป็นตัวเลข 3 ตัว คั่นด้วยเครื่องหมายจุลภาค (,) เท่านั้น เช่น: 0.8,0.9,130
+    ตอบกลับเป็นตัวเลข 3 ตัว คั่นด้วยเครื่องหมายจุลภาค (,) เท่านั้น เช่น: 0.3,0.4,75
     """
     try:
         response = model.generate_content(prompt)
@@ -292,396 +96,395 @@ def analyze_mood_with_gemini(text):
 
 def fallback_analyze_mood(text):
     text = text.lower()
-    if any(word in text for word in ["เศร้า", "เหงา", "อกหัก", "ดิ่ง"]): 
-        return 0.2, 0.2, 80.0
-    elif any(word in text for word in ["สนุก", "มันส์", "เต้น"]): 
-        return 0.8, 0.8, 130.0
-    return 0.5, 0.5, 100.0
+    if any(word in text for word in ["เศร้า", "เหงา", "อกหัก", "ดิ่ง", "calm", "rain"]): 
+        return 0.2, 0.2, 70.0
+    elif any(word in text for word in ["สนุก", "มันส์", "เต้น", "สดใส"]): 
+        return 0.8, 0.8, 128.0
+    return 0.4, 0.5, 85.0
 
 @st.cache_data(ttl=3600)
 def get_spotify_track_info(track_name, artist_name):
-    """ดึงรูปปก, ตัวอย่างเสียง (Audio Preview), และลิงก์ฟังเพลง โดยลองจากหลาย Source"""
+    """ดึงรูปปกและตัวอย่างเสียงจาก iTunes/Deezer API"""
     clean_title = re.sub(r'[\(\[\-\~].*?[\)\]\-\~]', '', str(track_name)).strip()
     clean_artist = str(artist_name).split(',')[0].strip()
     
-    # 1. ลองดึงจาก iTunes API
     try:
         query = f"{clean_title} {clean_artist}"
         url = f"https://itunes.apple.com/search?term={requests.utils.quote(query)}&limit=1&entity=song"
-        res = requests.get(url, timeout=4)
+        res = requests.get(url, timeout=3)
         if res.status_code == 200:
             data = res.json()
             if data.get('resultCount', 0) > 0:
                 t = data['results'][0]
                 img = t.get('artworkUrl100', '').replace('100x100bb', '500x500bb')
                 prev = t.get('previewUrl', None)
-                link = t.get('trackViewUrl', None)
-                if img:
-                    return img, prev, link
+                if img: return img, prev
     except Exception:
         pass
 
-    # 2. สำรองด้วย Deezer API
     try:
         query_d = f"{clean_title} {clean_artist}"
         url_d = f"https://api.deezer.com/search?q={requests.utils.quote(query_d)}&limit=1"
-        res_d = requests.get(url_d, timeout=4)
+        res_d = requests.get(url_d, timeout=3)
         if res_d.status_code == 200:
             data_d = res_d.json()
             if data_d.get('data') and len(data_d['data']) > 0:
                 t = data_d['data'][0]
                 img = t.get('album', {}).get('cover_xl') or t.get('album', {}).get('cover_big')
                 prev = t.get('preview', None)
-                link = t.get('link', None)
-                if img:
-                    return img, prev, link
+                if img: return img, prev
     except Exception:
         pass
 
-    return None, None, None
-
-def get_song_reason(data, index, row):
-    """คำนวณและสร้างเหตุผลรายเพลงให้ตรงกับเพลงแบบ 100%"""
-    reasons_list = data.get("song_reasons", [])
-    
-    # 1. ดึงจาก Gemini AI ตาม Index
-    if isinstance(reasons_list, list) and index < len(reasons_list):
-        item = reasons_list[index]
-        if isinstance(item, dict):
-            r = item.get("reason")
-            tag = item.get("mood_tag", "#DJChoice")
-            if r: 
-                return r, tag
-
-    # 2. คำนวณแบบ Dynamic จาก Audio Features ของเพลงนั้นๆ
-    energy = row.get('energy', 0.5)
-    valence = row.get('valence', 0.5)
-    tempo = row.get('tempo', 100)
-    
-    if energy > 0.7:
-        reason_fb = f"เพลงนี้มีจังหวะพลังงานสูง (Energy: {energy:.2f}, Tempo: {int(tempo)} BPM) ช่วยปลุกความสดใส เติมไฟให้อารมณ์ของคุณกระปรี้กระเปร่าขึ้นทันที"
-        tag_fb = "🔥 #เพิ่มพลังใจ"
-    elif valence < 0.35:
-        reason_fb = f"ทำนองนุ่มลึกในโทนอารมณ์นี้ (Valence: {valence:.2f}) จะอยู่เป็นเพื่อนโอบกอดความรู้สึกของคุณในห้วงเวลาที่ต้องการความเข้าใจ"
-        tag_fb = "🌙 #โอบกอดอารมณ์"
-    elif valence > 0.65:
-        reason_fb = f"เสียงดนตรีฟีลกู้ด (Valence: {valence:.2f}) เพิ่มรอยยิ้ม เติมบรรยากาศความสุขและความเบาสบายให้วันของคุณ"
-        tag_fb = "✨ #ฟีลกู้ดชิลๆ"
-    else:
-        reason_fb = f"จังหวะกำลังดีปานกลาง ({int(tempo)} BPM) ผสมผสานดนตรีที่สมดุล ให้ความรู้สึกผ่อนคลายและเข้ากับบรรยากาศได้อย่างลงตัว"
-        tag_fb = "🍃 #ผ่อนคลายสมดุล"
-        
-    return reason_fb, tag_fb
-
-def save_feedback(mood, cluster, feedback_type):
-    try:
-        url = st.secrets.get("SHEETS_WEB_APP_URL", "")
-        if url:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            payload = {"timestamp": timestamp, "mood": mood, "cluster": str(cluster), "feedback": feedback_type}
-            requests.post(url, json=payload)
-    except Exception:
-        pass
+    return "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&auto=format&fit=crop&q=80", "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3"
 
 # ==========================================
 # 5. จัดการ Session State
 # ==========================================
-if 'playlist_data' not in st.session_state:
-    st.session_state.playlist_data = None
-if 'feedback_submitted' not in st.session_state:
-    st.session_state.feedback_submitted = False
-if 'current_card_index' not in st.session_state:
-    st.session_state.current_card_index = 0
+if 'cart_count' not in st.session_state:
+    st.session_state.cart_count = 0
+if 'current_track_idx' not in st.session_state:
+    st.session_state.current_track_idx = 0
+if 'is_playing' not in st.session_state:
+    st.session_state.is_playing = False
+if 'is_liked' not in st.session_state:
+    st.session_state.is_liked = False
+if 'active_playlist' not in st.session_state:
+    # เพลย์ลิสต์เริ่มต้นของ quietpress
+    st.session_state.active_playlist = [
+        {
+            "title": "Fern Light",
+            "artist": "Helia Marsh",
+            "tag": "🍃 #VernalWoods",
+            "reason": "จังหวะ Drone นุ่มนวลผสมเสียงธรรมชาติ บันทึกสดบนแผ่น LPs Cut ครั้งเดียว",
+            "img": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&auto=format&fit=crop&q=80",
+            "preview": "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3"
+        },
+        {
+            "title": "Silent Moss",
+            "artist": "Vernal Echoes",
+            "tag": "🌙 #CalmListener",
+            "reason": "โทนเสียงอะคูสติกโอบกอดความรู้สึกอย่างสงบ เหมาะสำหรับค่ำคืนที่ต้องการความผ่อนคลาย",
+            "img": "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&auto=format&fit=crop&q=80",
+            "preview": "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c8a73467.mp3"
+        }
+    ]
 
 # ==========================================
-# 6. ส่วนรับข้อมูลจากผู้ใช้ (UI)
+# 6. รับ Query Parameter สั่งเปลี่ยนเพลง/สั่งซื้อ
 # ==========================================
-with st.container():
-    st.markdown("##### 🎙️ เล่าความรู้สึกของคุณผ่านเสียงหรือพิมพ์ข้อความ")
+query_params = st.query_params
+if "action" in query_params:
+    action = query_params["action"]
+    if action == "add_cart":
+        st.session_state.cart_count += 1
+    elif action == "toggle_play":
+        st.session_state.is_playing = not st.session_state.is_playing
+    elif action == "next":
+        st.session_state.current_track_idx = (st.session_state.current_track_idx + 1) % len(st.session_state.active_playlist)
+    elif action == "prev":
+        st.session_state.current_track_idx = (st.session_state.current_track_idx - 1 + len(st.session_state.active_playlist)) % len(st.session_state.active_playlist)
+    elif action == "toggle_like":
+        st.session_state.is_liked = not st.session_state.is_liked
+    st.query_params.clear()
+
+curr_track = st.session_state.active_playlist[st.session_state.current_track_idx]
+
+# ==========================================
+# 7. Render หน้าเว็บด้วย HTML5/CSS/JS Component
+# ==========================================
+html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="https://db.onlinewebfonts.com/c/a64ff11d2c24584c767f6257e880dc65?family=Helvetica+Regular">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body {{
+      font-family: 'Helvetica Regular', Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #000;
+      color: #fff;
+    }}
+
+    /* Liquid Glass Effect */
+    .liquid-glass {{
+      background: rgba(255, 255, 255, 0.01);
+      background-blend-mode: luminosity;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      border: none;
+      box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+      position: relative;
+      overflow: hidden;
+    }}
+    .liquid-glass::before {{
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1.4px;
+      background: linear-gradient(180deg,
+        rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.15) 20%,
+        rgba(255,255,255,0) 40%, rgba(255,255,255,0) 60%,
+        rgba(255,255,255,0.15) 80%, rgba(255,255,255,0.45) 100%);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }}
+
+    /* Fade-up animations */
+    @keyframes fade-up {{
+      from {{ opacity: 0; transform: translateY(20px); }}
+      to   {{ opacity: 1; transform: none; }}
+    }}
+    .animate-fade-up {{
+      animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    }}
+    .delay-1 {{ animation-delay: 0.1s; }}
+    .delay-2 {{ animation-delay: 0.25s; }}
+    .delay-3 {{ animation-delay: 0.4s; }}
+    .delay-4 {{ animation-delay: 0.55s; }}
+    .delay-5 {{ animation-delay: 0.75s; }}
+
+    /* แผ่นเสียงหมุน 3D */
+    @keyframes rotateVinyl {{
+      from {{ transform: rotate(0deg); }}
+      to {{ transform: rotate(360deg); }}
+    }}
+    .animate-vinyl-spin {{
+      animation: rotateVinyl 6s linear infinite;
+    }}
+    .animate-vinyl-pause {{
+      animation-play-state: paused;
+    }}
+
+    /* Equalizer Bars */
+    @keyframes equalBlink {{
+      0%, 100% {{ height: 3px; }}
+      50% {{ height: 14px; }}
+    }}
+    .eq-bar {{
+      width: 3px;
+      margin: 0 1px;
+      background: #1d4ed8;
+      border-radius: 2px;
+      animation: equalBlink 1s ease-in-out infinite alternate;
+    }}
+    .eq-bar:nth-child(1) {{ animation-delay: 0.1s; }}
+    .eq-bar:nth-child(2) {{ animation-delay: 0.4s; }}
+    .eq-bar:nth-child(3) {{ animation-delay: 0.2s; }}
+    .eq-bar:nth-child(4) {{ animation-delay: 0.5s; }}
+  </style>
+</head>
+<body>
+  <div class="relative h-screen w-full overflow-hidden select-none">
     
-    text_from_mic = speech_to_text(
-        language='th-TH', 
-        start_prompt="🎙 กดเพื่อพูดความรู้สึก", 
-        stop_prompt="🛑 กำลังฟัง... (กดเพื่อหยุด)", 
-        just_once=False,
-        key='STT'
-    )
+    <!-- Boomerang Video Canvas Background -->
+    <div class="absolute inset-0 z-0 scale-[1.08] origin-center overflow-hidden pointer-events-none">
+      <video id="bgVideo" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260611_183632_c311af08-e4b7-458f-81e7-79847a49b3d3.mp4" autoplay muted playsinline crossorigin="anonymous" class="w-full h-full object-cover"></video>
+      <canvas id="bgCanvas" class="w-full h-full object-cover hidden"></canvas>
+    </div>
 
-    default_text = text_from_mic if text_from_mic else ""
-    mood_text = st.text_area("ความรู้สึกของคุณ:", value=default_text, placeholder="เช่น วันนี้เลิกงานแล้ว เหนื่อยมากๆ อยากหาเพลงชิลๆ ฟังผ่อนคลาย...", height=95)
+    <!-- Header (absolute, top, z-20) -->
+    <header class="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 sm:px-8 py-5">
+      <div class="flex items-center gap-2.5">
+        <svg class="w-5 h-5 fill-white" viewBox="0 0 256 256">
+          <path d="M 256 256 L 128 256 C 198.692 256 256 198.692 256 128 C 256 57.308 198.692 0 128 0 C 57.308 0 0 57.308 0 128 C 0 198.692 57.308 256 128 256 L 0 256 L 0 0 L 256 0 Z M 128 104 C 141.255 104 152 114.745 152 128 C 152 141.255 141.255 152 128 152 C 114.745 152 104 141.255 104 128 C 104 114.745 114.745 104 128 104 Z" />
+        </svg>
+        <span class="text-base tracking-tight text-white font-medium">quietpress</span>
+      </div>
 
-    num_songs = st.slider("🎵 จำนวนเพลงที่ต้องการสุ่มจัด:", min_value=3, max_value=12, value=5, step=1)
+      <nav class="hidden md:flex items-center gap-8 text-sm text-white/90">
+        <a href="#" class="hover:text-white transition-colors">Anthology</a>
+        <a href="#" class="hover:text-white transition-colors">Talents</a>
+        <a href="#" class="hover:text-white transition-colors">Sound diary</a>
+        <a href="#" class="hover:text-white transition-colors">Playback salon</a>
+      </nav>
 
-    if st.button("✨ ให้ AI DJ จัดเพลงให้ทันที", type="primary", use_container_width=True):
-        if not mood_text:
-            st.warning("กรุณาพิมพ์หรือพูดความรู้สึกของคุณก่อนครับ")
-        else:
-            with st.spinner("🎧 DJ AI กำลังอ่านใจและวิเคราะห์อารมณ์ดนตรี..."):
-                t_energy, t_valence, t_tempo = analyze_mood_with_gemini(mood_text)
+      <div class="flex items-center gap-3">
+        <a href="?action=add_cart" target="_self" class="rounded-xl bg-white p-1 pr-3 sm:pr-4 flex items-center gap-2.5 text-gray-900 transition-transform hover:scale-105 active:scale-95 shadow-md">
+          <div class="h-7 w-7 rounded-lg bg-blue-700 flex items-center justify-center text-white">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+          </div>
+          <span class="text-xs sm:text-sm font-medium"><span class="hidden sm:inline">Cart </span>({st.session_state.cart_count})</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- Hero Content (centered, z-10) -->
+    <main className="relative z-10 h-full flex flex-col justify-center px-4 sm:px-6 pt-24 max-w-5xl mx-auto" style="padding-top: 11rem; padding-left: 2rem;">
+      <div class="animate-fade-up delay-1 mb-5">
+        <span class="liquid-glass rounded-lg px-4 py-1.5 text-xs sm:text-sm text-white" style="background: rgba(255, 255, 255, 0.16);">
+          Press 04 . Vernal woods
+        </span>
+      </div>
+
+      <h1 class="animate-fade-up delay-2 max-w-3xl text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[1.1] text-white">
+        records cut for the<br>calm listener.
+      </h1>
+
+      <p class="animate-fade-up delay-3 mt-5 max-w-md text-sm sm:text-base md:text-lg leading-relaxed text-white/90">
+        Drone, roots, and nature-captured sound on wax LPs. Every disc cut just once, snag it or miss.
+      </p>
+
+      <div class="animate-fade-up delay-4 mt-8 flex flex-col sm:flex-row gap-3">
+        <a href="?action=add_cart" target="_self" class="rounded-xl bg-white px-7 py-2.5 text-sm text-gray-900 hover:scale-105 active:scale-95 transition-transform text-center font-medium">
+          Browse the shelves
+        </a>
+        <a href="?action=toggle_play" target="_self" class="liquid-glass rounded-xl px-7 py-2.5 text-sm text-white hover:scale-105 active:scale-95 transition-transform text-center font-medium">
+          Newest arrivals
+        </a>
+      </div>
+    </main>
+
+    <!-- Now Playing Widget (bottom-right, z-20) -->
+    <div class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 md:bottom-8 md:right-10 z-20 w-[270px] sm:w-72 animate-fade-up delay-5 flex flex-col gap-2">
+      
+      <!-- DJ Reason Box สไตล์ app.py -->
+      <div class="liquid-glass rounded-2xl p-2.5 text-xs text-white/90 shadow-xl border border-white/10">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-blue-300">🤖 DJ AI Perspective</span>
+          {'<div class="flex items-end h-3"><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span></div>' if st.session_state.is_playing else ''}
+        </div>
+        <p class="line-clamp-2 leading-tight text-white/80">{curr_track['reason']}</p>
+      </div>
+
+      <!-- Track Card -->
+      <div class="rounded-2xl bg-white p-2.5 pr-4 shadow-lg text-gray-900">
+        <div class="flex items-center gap-3">
+          <div class="relative w-11 h-11 flex-shrink-0 flex items-center justify-center">
+            <!-- 3D Vinyl Disk -->
+            <div class="absolute right-[-5px] w-10 h-10 rounded-full bg-neutral-900 border border-neutral-700 flex items-center justify-center shadow-md animate-vinyl-spin {'animate-vinyl-pause' if not st.session_state.is_playing else ''}">
+              <div class="w-3 h-3 rounded-full bg-blue-700"></div>
+            </div>
+            <!-- Album Cover -->
+            <img src="{curr_track['img']}" class="relative z-10 w-11 h-11 rounded-xl object-cover shadow-md" />
+          </div>
+
+          <div class="flex-1 min-w-0">
+            <span class="text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded truncate inline-block mb-0.5">{curr_track['tag']}</span>
+            <p class="text-sm font-medium truncate text-gray-900 leading-none">{curr_track['artist']} -- {curr_track['title']}</p>
+            <div class="mt-2 flex items-center gap-2">
+              <div class="h-1 flex-1 rounded-full bg-gray-200 overflow-hidden">
+                <div class="h-full bg-blue-700 {'w-[65%]' if st.session_state.is_playing else 'w-[30%]'}" ></div>
+              </div>
+              <div class="flex text-[10px] text-gray-500 font-mono gap-1">
+                <span>0:33</span><span>-1:21</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls Row -->
+      <div class="flex items-center gap-2">
+        <a href="?action=prev" target="_self" class="flex-1 rounded-2xl bg-white py-2 text-center text-sm font-bold text-gray-900 shadow-lg hover:scale-105 active:scale-95 transition-transform">Prev</a>
+        <a href="?action=toggle_like" target="_self" class="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-transform">
+          <svg class="w-4 h-4 {'text-blue-700 fill-blue-700' if st.session_state.is_liked else 'text-blue-700'}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.684a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+        </a>
+        <a href="?action=next" target="_self" class="flex-1 rounded-2xl bg-white py-2 text-center text-sm font-bold text-gray-900 shadow-lg hover:scale-105 active:scale-95 transition-transform">Next</a>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Audio Player Elements -->
+  <audio id="audioPlayer" src="{curr_track['preview']}" {'autoplay' if st.session_state.is_playing else ''}></audio>
+
+  <script>
+    // Boomerang Video Loop Logic
+    const video = document.getElementById('bgVideo');
+    const canvas = document.getElementById('bgCanvas');
+    const ctx = canvas.getContext('2d');
+    let frames = [];
+
+    video.addEventListener('ended', () => {{
+      video.classList.add('hidden');
+      canvas.classList.remove('hidden');
+      
+      let frameIdx = 0;
+      let forward = true;
+      setInterval(() => {{
+        if (frames.length > 0) {{
+          ctx.putImageData(frames[frameIdx], 0, 0);
+          if (forward) {{
+            frameIdx++;
+            if (frameIdx >= frames.length) {{ frameIdx = frames.length - 1; forward = false; }}
+          }} else {{
+            frameIdx--;
+            if (frameIdx < 0) {{ frameIdx = 0; forward = true; }}
+          }}
+        }}
+      }}, 1000 / 30);
+    }});
+
+    function capture() {{
+      if (!video.paused && !video.ended) {{
+        if (canvas.width === 0 && video.videoWidth > 0) {{
+          const scale = Math.min(1, 960 / video.videoWidth);
+          canvas.width = video.videoWidth * scale;
+          canvas.height = video.videoHeight * scale;
+        }}
+        if (canvas.width > 0) {{
+          const offCanvas = document.createElement('canvas');
+          offCanvas.width = canvas.width;
+          offCanvas.height = canvas.height;
+          const offCtx = offCanvas.getContext('2d');
+          offCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          frames.push(offCtx.getImageData(0, 0, canvas.width, canvas.height));
+        }}
+        requestAnimationFrame(capture);
+      }}
+    }}
+    video.addEventListener('play', () => requestAnimationFrame(capture));
+  </script>
+</body>
+</html>
+"""
+
+st.components.v1.html(html_content, height=800, scrolling=False)
+
+# ==========================================
+# 8. ส่วนค้นหาเพลงตามอารมณ์สไตล์ AI DJ (Bottom Controls)
+# ==========================================
+with st.expander("🎙️ พิมพ์/พูดความรู้สึกเพื่อแมตช์เพลงด้วย AI DJ"):
+    user_mood = st.text_input("ระบุอารมณ์ของคุณที่นี่:", placeholder="เช่น เหนื่อยจากงาน อยากฟังเพลงสไตล์ Drone ผ่อนคลาย...")
+    if st.button("✨ ให้ AI จัดเพลงให้ทันที", type="primary"):
+        if user_mood:
+            with st.spinner("🎧 AI DJ กำลังวิเคราะห์อารมณ์ดนตรี..."):
+                e, v, t = analyze_mood_with_gemini(user_mood)
                 
-                try:
-                    user_df = pd.DataFrame([[0.5, t_energy, t_valence, t_tempo]], columns=scaler.feature_names_in_)
-                    scaled_input = scaler.transform(user_df)
-                except AttributeError:
-                    user_features = [[0.5, t_energy, t_valence, t_tempo]]
-                    scaled_input = scaler.transform(user_features)
-
-                predicted_cluster = kmeans.predict(scaled_input)[0]
-                cluster_songs = df_songs[df_songs['cluster_id'] == predicted_cluster]
-                sampled_songs = cluster_songs.sample(min(num_songs, len(cluster_songs))).reset_index(drop=True)
-                
-                song_items_prompt = []
-                for idx, r in sampled_songs.iterrows():
-                    song_items_prompt.append(f"เพลงลำดับ {idx}: '{r['track_name']}' โดย {r['artists']}")
-                song_list_str = "\n".join(song_items_prompt)
-
-                dj_response = f"จัดบทเพลงเซ็ตพิเศษตามอารมณ์ '{mood_text[:20]}...' มาให้คุณฟังแล้วครับ!"
-                song_reasons = []
-
-                if model:
-                    prompt_dj = (
-                        "คุณคือ 'DJ AI' ผู้เชี่ยวชาญด้านดนตรีสไตล์เป็นกันเองและใส่ใจผู้ฟัง\n"
-                        f"ผู้ใช้บอกความรู้สึกว่า: '{mood_text}'\n\n"
-                        f"เพลงที่จัดมาทั้งหมด {len(sampled_songs)} เพลง มีดังนี้:\n"
-                        f"{song_list_str}\n\n"
-                        "จงตอบกลับในรูปแบบ JSON โครงสร้างนี้เท่านั้น:\n"
-                        "{\n"
-                        '  "dj_text": "คำทักทายภาพรวมจาก DJ AI พูดถึงอารมณ์รวมสั้นๆ ภาษาไทย เป็นกันเอง",\n'
-                        '  "reasons": [\n'
-                        "    {\n"
-                        '      "id": 0,\n'
-                        '      "mood_tag": "#แท็กอารมณ์สั้นๆ",\n'
-                        '      "reason": "เหตุผลสั้นๆ 1-2 ประโยคว่าทำไมเพลงลำดับ 0 ถึงเข้ากับอารมณ์นี้"\n'
-                        "    }\n"
-                        "  ]\n"
-                        "}"
-                    )
-                    
+                # หากมีโมเดล KMeans ให้ทำ Clustered Match
+                if kmeans and scaler and df_songs is not None:
                     try:
-                        response = model.generate_content(
-                            prompt_dj,
-                            generation_config={"response_mime_type": "application/json"}
-                        )
-                        clean_text = clean_json_string(response.text)
-                        dj_data = json.loads(clean_text)
-                        dj_response = dj_data.get("dj_text", dj_response)
-                        song_reasons = dj_data.get("reasons", [])
+                        scaled = scaler.transform([[0.5, e, v, t]])
+                        cluster = kmeans.predict(scaled)[0]
+                        matched_df = df_songs[df_songs['cluster_id'] == cluster].sample(min(3, len(df_songs)))
+                        
+                        new_playlist = []
+                        for _, r in matched_df.iterrows():
+                            t_name = r.get('track_name', 'Track')
+                            a_name = r.get('artists', 'Artist')
+                            img, prev = get_spotify_track_info(t_name, a_name)
+                            new_playlist.append({
+                                "title": t_name,
+                                "artist": a_name,
+                                "tag": f"✨ #{user_mood[:10]}",
+                                "reason": f"เพลงนี้ตรงกับค่าอารมณ์ของคุณ (Energy: {e:.2f}, Tempo: {int(t)} BPM)",
+                                "img": img,
+                                "preview": prev
+                            })
+                        st.session_state.active_playlist = new_playlist
+                        st.session_state.current_track_idx = 0
+                        st.session_state.is_playing = True
+                        st.rerun()
                     except Exception:
                         pass
-
-                st.session_state.playlist_data = {
-                    "mood": mood_text,
-                    "cluster": predicted_cluster,
-                    "dj_text": dj_response,
-                    "song_reasons": song_reasons,
-                    "sampled_songs": sampled_songs,
-                    "features": {"energy": t_energy, "valence": t_valence, "tempo": t_tempo}
-                }
-                st.session_state.feedback_submitted = False
-                st.session_state.current_card_index = 0
-
-# ==========================================
-# 7. ส่วนแสดงผลลัพธ์การ์ดเพลงอนิเมชัน (Card View)
-# ==========================================
-if st.session_state.playlist_data:
-    data = st.session_state.playlist_data
-    songs = data["sampled_songs"]
-    total_songs = len(songs)
-
-    st.markdown("---")
-    
-    # คำทักทายภาพรวมจาก DJ AI + Animated Equalizer
-    st.markdown(f"""
-    <div class="dj-speech-box">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-            <span class="dj-badge">🤖 DJ AI Message</span>
-            <div class="eq-container">
-                <span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span>
-            </div>
-        </div>
-        <div style="font-size: 1.1rem; line-height: 1.6; font-weight: 500; margin-top: 10px; color: #F8FAFC;">
-            "{data['dj_text']}"
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ปุ่มสลับโหมดการดู
-    view_mode = st.radio(
-        "รูปแบบการแสดงผล:", 
-        ["🃏 มุมมองการ์ดสลับ (Card Switcher)", "📋 รายการทั้งหมด (Grid View)"], 
-        horizontal=True
-    )
-
-    if "มุมมองการ์ดสลับ" in view_mode:
-        # --- 🃏 ระบบการ์ดสลับเพลงแบบอนิเมชัน ---
-        
-        nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
-        
-        with nav_col1:
-            if st.button("⬅️ เพลงก่อนหน้า", use_container_width=True, key="btn_prev"):
-                st.session_state.current_card_index = (st.session_state.current_card_index - 1) % total_songs
-                st.rerun()
-
-        with nav_col2:
-            st.markdown(
-                f"<div style='text-align: center; font-size: 1.1rem; font-weight: 700; color: #00F2FE; margin-top: 5px;'>"
-                f"🎵 เพลงที่ {st.session_state.current_card_index + 1} จาก {total_songs}</div>", 
-                unsafe_allow_html=True
-            )
-
-        with nav_col3:
-            if st.button("เพลงถัดไป ➡", use_container_width=True, key="btn_next"):
-                st.session_state.current_card_index = (st.session_state.current_card_index + 1) % total_songs
-                st.rerun()
-
-        # ดึงข้อมูลเพลงปัจจุบัน
-        current_idx = st.session_state.current_card_index
-        row = songs.iloc[current_idx]
-        track_name = row['track_name']
-        artist_name = row['artists']
-        
-        img_url, preview_url, spot_url = get_spotify_track_info(track_name, artist_name)
-        reason, mood_tag = get_song_reason(data, current_idx, row)
-
-        # แสดงผลการ์ดเพลงสลับพร้อมแผ่นเสียง 3D
-        st.markdown('<div class="song-card-animated">', unsafe_allow_html=True)
-        
-        card_col1, card_col2 = st.columns([1.1, 1.9])
-        
-        with card_col1:
-            if img_url:
-                st.markdown(f"""
-                <div class="album-art-wrapper">
-                    <div class="vinyl-disk"><div class="vinyl-center"></div></div>
-                    <img src="{img_url}" class="album-cover-img" />
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="album-art-wrapper">
-                    <div class="vinyl-disk"><div class="vinyl-center"></div></div>
-                    <div class="album-cover-placeholder">
-                        <div style="font-size: 2.2rem; margin-bottom: 5px;">💿</div>
-                        <div style="font-weight: 700; color: #00F2FE; font-size: 0.9rem;">{track_name[:18]}</div>
-                        <div style="color: #94A3B8; font-size: 0.8rem;">{artist_name[:18]}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-        with card_col2:
-            st.markdown(f'<span class="mood-tag-badge">{mood_tag}</span>', unsafe_allow_html=True)
-            st.markdown(f"<h2 style='margin-top:0px; margin-bottom: 5px;'>{track_name}</h2>", unsafe_allow_html=True)
-            st.markdown(f"🎤 **ศิลปิน:** `{artist_name}`")
-            
-            st.markdown(f"""
-            <div class="reason-box">
-                💡 <b>มุมมอง DJ สำหรับเพลงนี้ ({current_idx + 1}/{total_songs}):</b><br/>
-                {reason}
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.write("")
-            if preview_url:
-                st.audio(preview_url, format="audio/mp3")
-            if spot_url:
-                st.markdown(f"[🔗 เปิดฟังเวอร์ชันเต็มบนเว็บ/แอป]({spot_url})")
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # แถบ Quick Pills เลือกสลับการ์ดด่วน
-        tab_titles = [f"🎵 {i+1}. {songs.iloc[i]['track_name'][:12]}..." if len(songs.iloc[i]['track_name']) > 12 else f"🎵 {i+1}. {songs.iloc[i]['track_name']}" for i in range(total_songs)]
-        selected_tab = st.pills("เลือกสลับการ์ดเพลงด่วน:", tab_titles, default=tab_titles[current_idx], key="pills_nav")
-        if selected_tab:
-            selected_index = tab_titles.index(selected_tab)
-            if selected_index != st.session_state.current_card_index:
-                st.session_state.current_card_index = selected_index
-                st.rerun()
-
-    else:
-        # --- 📋 มุมมองรายการทั้งหมด (Grid View) ---
-        for i, row in songs.iterrows():
-            track_name = row['track_name']
-            artist_name = row['artists']
-            img_url, preview_url, spot_url = get_spotify_track_info(track_name, artist_name)
-            reason, mood_tag = get_song_reason(data, i, row)
-
-            st.markdown('<div class="song-card-animated">', unsafe_allow_html=True)
-            c1, c2 = st.columns([1, 2.5])
-            
-            with c1:
-                if img_url:
-                    st.markdown(f"""
-                    <div class="album-art-wrapper">
-                        <div class="vinyl-disk"><div class="vinyl-center"></div></div>
-                        <img src="{img_url}" class="album-cover-img" style="width: 140px; height: 140px;" />
-                    </div>
-                    """, unsafe_allow_html=True)
                 else:
-                    st.markdown(f"""
-                    <div class="album-art-wrapper">
-                        <div class="vinyl-disk"><div class="vinyl-center"></div></div>
-                        <div class="album-cover-placeholder" style="width: 140px; height: 140px;">
-                            <div style="font-size: 1.8rem;">💿</div>
-                            <div style="font-size: 0.75rem; color: #00F2FE;">{track_name[:12]}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-            with c2:
-                st.markdown(f'<span class="mood-tag-badge">{mood_tag}</span>', unsafe_allow_html=True)
-                st.subheader(f"{i+1}. {track_name}")
-                st.markdown(f"🎤 **ศิลปิน:** `{artist_name}`")
-                st.markdown(f"<div class='reason-box'>💡 <b>มุมมอง DJ:</b> {reason}</div>", unsafe_allow_html=True)
-                st.write("")
-                if preview_url:
-                    st.audio(preview_url, format="audio/mp3")
-                if spot_url:
-                    st.markdown(f"[🎧 คลิกฟังเพลงเต็ม]({spot_url})")
-                    
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # ==========================================
-    # 8. กราฟวิเคราะห์อารมณ์ & Feedback
-    # ==========================================
-    st.markdown("---")
-    
-    col_chart, col_feed = st.columns([1.2, 1])
-    
-    with col_chart:
-        f_energy = data["features"]["energy"]
-        f_valence = data["features"]["valence"]
-        f_tempo_scaled = data["features"]["tempo"] / 200.0
-
-        categories = ['ความมันส์ (Energy)', 'ความสดใส (Valence)', 'ความเร็ว (Tempo)']
-        values = [f_energy, f_valence, f_tempo_scaled]
-        categories.append(categories[0]) 
-        values.append(values[0])
-
-        fig = go.Figure(data=go.Scatterpolar(
-            r=values, theta=categories, fill='toself', fillcolor='rgba(0, 242, 254, 0.25)', line_color='#00F2FE'
-        ))
-        fig.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 1])), 
-            showlegend=False, 
-            title="📊 กราฟวิเคราะห์โทนอารมณ์ดนตรี",
-            margin=dict(l=35, r=35, t=35, b=35)
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_feed:
-        st.markdown("### 📝 ถูกใจ Playlist นี้ไหม?")
-        st.write("เสียงตอบรับของคุณจะช่วยให้ AI DJ ปรับปรุงการคัดสรรเพลงในครั้งถัดไปให้ดียิ่งขึ้น")
-        
-        if not st.session_state.feedback_submitted:
-            btn_col1, btn_col2 = st.columns(2)
-            with btn_col1:
-                if st.button("👍 โดนใจมาก", use_container_width=True):
-                    save_feedback(data["mood"], data["cluster"], "Like")
-                    st.session_state.feedback_submitted = True
-                    st.rerun()
-            with btn_col2:
-                if st.button("👎 ยังไม่ค่อยโดน", use_container_width=True):
-                    save_feedback(data["mood"], data["cluster"], "Dislike")
-                    st.session_state.feedback_submitted = True
-                    st.rerun()
-        else:
-            st.success("💖 ขอบคุณสำหรับคำติชมครับ! ระบบบันทึกข้อมูลเรียบร้อยแล้ว")
+                    st.success(f"วิเคราะห์อารมณ์สำเร็จ! (Energy: {e:.2f}, Valence: {v:.2f}, Tempo: {int(t)} BPM)")
