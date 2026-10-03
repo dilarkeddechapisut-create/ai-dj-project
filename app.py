@@ -8,7 +8,7 @@ import json
 import re
 
 # ==========================================
-# 1. Page Config & Global CSS
+# 1. Page Config & CSS
 # ==========================================
 st.set_page_config(
     page_title="quietpress -- vinyl record label",
@@ -17,17 +17,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Helper Function: คลีนช่องว่างหน้าบรรทัด 100% ป้องกัน Streamlit แสดงผลเป็น Code Block
+# Helper Function ป้องกันปัญหา Streamlit แสดงผล HTML เป็น Code Block
 def render_html(html_str):
     cleaned = "\n".join([line.strip() for line in html_str.split("\n")])
     st.markdown(cleaned, unsafe_allow_html=True)
 
-# Custom Style Sheet
+# CSS Customization
 render_html("""
 <link rel="stylesheet" href="https://db.onlinewebfonts.com/c/a64ff11d2c24584c767f6257e880dc65?family=Helvetica+Regular">
 
 <style>
-    /* Fullscreen Viewport Setup */
+    /* Clean up default Streamlit elements */
     #MainMenu, footer, header {visibility: hidden;}
     .block-container {
         padding: 1rem 2rem !important;
@@ -61,49 +61,61 @@ render_html("""
         object-fit: cover;
     }
 
-    /* Glassmorphic UI */
+    /* Liquid Glass Styling */
     .liquid-glass {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        box-shadow: 0 12px 32px 0 rgba(0, 0, 0, 0.35);
+        border-radius: 18px;
     }
 
     /* Animations */
     @keyframes fadeUp {
-        from { opacity: 0; transform: translateY(12px); }
+        from { opacity: 0; transform: translateY(15px); }
         to { opacity: 1; transform: translateY(0); }
     }
     .animate-fade-up {
         animation: fadeUp 0.5s ease-out forwards;
     }
 
-    @keyframes rotateVinyl {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-    }
-    .vinyl-spin { animation: rotateVinyl 6s linear infinite; }
-    .vinyl-pause { animation-play-state: paused; }
-
+    /* Equalizer White Bars Animation */
     @keyframes equalBlink {
-        0%, 100% { height: 3px; }
-        50% { height: 12px; }
+        0%, 100% { height: 4px; }
+        50% { height: 18px; }
     }
-    .eq-bar {
+    .eq-bar-white {
         width: 3px;
-        margin: 0 1px;
-        background: #3b82f6;
+        background: #ffffff;
         border-radius: 2px;
-        animation: equalBlink 0.8s ease-in-out infinite alternate;
+        animation: equalBlink 0.7s ease-in-out infinite alternate;
     }
-    .eq-bar:nth-child(1) { animation-delay: 0.1s; }
-    .eq-bar:nth-child(2) { animation-delay: 0.3s; }
-    .eq-bar:nth-child(3) { animation-delay: 0.2s; }
-    .eq-bar:nth-child(4) { animation-delay: 0.4s; }
+    .eq-bar-white:nth-child(1) { animation-delay: 0.1s; }
+    .eq-bar-white:nth-child(2) { animation-delay: 0.3s; }
+    .eq-bar-white:nth-child(3) { animation-delay: 0.2s; }
+    .eq-bar-white:nth-child(4) { animation-delay: 0.4s; }
 
-    /* Compact Form Inputs */
+    /* Custom White Pill Buttons for Player Controls */
+    .pill-btn div[data-testid="stButton"] > button {
+        background-color: #ffffff !important;
+        color: #1e293b !important;
+        border-radius: 25px !important;
+        border: none !important;
+        font-weight: 600 !important;
+        font-size: 0.82rem !important;
+        height: 38px !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.25) !important;
+        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    }
+    .pill-btn div[data-testid="stButton"] > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.35) !important;
+        background-color: #ffffff !important;
+        color: #2563eb !important;
+    }
+
+    /* Form Input Customization */
     .stTextInput input {
         background: rgba(255, 255, 255, 0.08) !important;
         border: 1px solid rgba(255, 255, 255, 0.2) !important;
@@ -111,10 +123,6 @@ render_html("""
         border-radius: 10px !important;
         font-size: 0.85rem !important;
         height: 38px !important;
-    }
-    .stButton button {
-        border-radius: 10px !important;
-        font-size: 0.82rem !important;
     }
 </style>
 
@@ -167,7 +175,7 @@ render_html("""
 """)
 
 # ==========================================
-# 2. Gemini API & ML Initialization
+# 2. Gemini API & ML Model Setup
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
@@ -213,7 +221,7 @@ if 'cart_count' not in st.session_state:
 if 'current_track_idx' not in st.session_state:
     st.session_state.current_track_idx = 0
 if 'is_playing' not in st.session_state:
-    st.session_state.is_playing = False
+    st.session_state.is_playing = True
 if 'is_liked' not in st.session_state:
     st.session_state.is_liked = False
 if 'features' not in st.session_state:
@@ -239,7 +247,7 @@ if 'playlist' not in st.session_state:
     ]
 
 # ==========================================
-# 4. Top Header Navbar
+# 4. Navigation Header
 # ==========================================
 header_left, header_mid, header_right = st.columns([2, 5, 2])
 
@@ -269,7 +277,7 @@ with header_right:
         st.rerun()
 
 # ==========================================
-# 5. Left Hero & Search Section
+# 5. Left Hero Section
 # ==========================================
 left_col, right_col = st.columns([1.2, 1])
 
@@ -288,7 +296,6 @@ with left_col:
         </div>
     """)
 
-    # Compact Input Box
     render_html("<div style='max-width: 380px;' class='liquid-glass p-3 mb-2'>")
     
     m_col1, m_col2 = st.columns([2.5, 1])
@@ -309,7 +316,6 @@ with left_col:
             
     render_html("</div>")
 
-# AI DJ Search Execution
 if search_trigger and mood_query:
     with st.spinner("🎧 AI DJ กำลังจัดรายการ..."):
         e, v, t = 0.3, 0.4, 80.0
@@ -347,81 +353,86 @@ if search_trigger and mood_query:
                 pass
 
 # ==========================================
-# 6. Bottom-Right Floating Player Widget (แก้ไขเรื่องการล้นหน้าจอ)
+# 6. Bottom-Right Player & AI DJ Widget
 # ==========================================
 curr_track = st.session_state.playlist[st.session_state.current_track_idx]
 
 with right_col:
-    # ปรับ margin-top ให้พอดี ไม่ดันจนล้นขอบล่าง
-    render_html("<div style='margin-top: 25px; max-width: 330px; margin-left: auto; word-break: break-word;' class='animate-fade-up'>")
+    # คอนเทนเนอร์รวมเครื่องเล่นไว้ขวาล่าง
+    render_html("<div style='margin-top: 15px; max-width: 330px; margin-left: auto;' class='animate-fade-up'>")
     
-    # 1. AI DJ Card (คลีน HTML ป้องกันซอร์สโค้ดโผล่)
-    eq_html = '<div style="display:flex; align-items:flex-end; height:12px;"><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span></div>' if st.session_state.is_playing else ''
-    
+    # 📌 1. กล่องข้อความ AI DJ PERSPECTIVE (Liquid Glass ข้างบน)
     dj_card = f"""
-    <div class="liquid-glass" style="padding: 10px 12px; margin-bottom: 8px;">
+    <div class="liquid-glass" style="padding: 12px 14px; margin-bottom: 12px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <span style="font-size:0.65rem; font-weight:bold; color:#93c5fd; text-transform:uppercase;">🤖 AI DJ PERSPECTIVE</span>
-            {eq_html}
+            <span style="font-size:0.68rem; font-weight:bold; color:#93c5fd; letter-spacing:0.5px; text-transform:uppercase;">🤖 AI DJ PERSPECTIVE</span>
         </div>
-        <div style="font-size:0.75rem; color:rgba(255,255,255,0.85); line-height:1.3; overflow-wrap: break-word;">
+        <div style="font-size:0.78rem; color:rgba(255,255,255,0.9); line-height:1.35; word-break: break-word;">
             "{curr_track['reason']}"
         </div>
     </div>
     """
     render_html(dj_card)
 
-    # 2. Track Card (การ์ดเพลงและแผ่นเสียง 3D)
-    spin_class = "vinyl-spin" if st.session_state.is_playing else "vinyl-spin vinyl-pause"
-    track_card = f"""
-    <div style="background:white; border-radius: 12px; padding: 10px; color:#111827; box-shadow: 0 10px 25px rgba(0,0,0,0.4); margin-bottom: 8px;">
-        <div style="display:flex; align-items:center; gap: 10px;">
-            <div style="position:relative; width: 40px; height: 40px; flex-shrink:0;">
-                <div class="{spin_class}" style="position:absolute; right:-5px; width: 36px; height: 36px; border-radius:50%; background:#171717; border: 1px solid #404040; display:flex; align-items:center; justify-content:center;">
-                    <div style="width: 10px; height: 10px; border-radius:50%; background:#1d4ed8;"></div>
-                </div>
-                <img src="{curr_track['img']}" style="position:relative; z-index:2; width: 40px; height: 40px; border-radius:6px; object-fit:cover;" />
+    # 📌 2. เครื่องเล่นเพลงทรงแคปซูลสีขาว (ตรงตามภาพตัวอย่าง)
+    eq_bars = """
+    <div style="display:flex; align-items:flex-end; gap:2px; height:16px;">
+        <span class="eq-bar-white"></span>
+        <span class="eq-bar-white"></span>
+        <span class="eq-bar-white"></span>
+        <span class="eq-bar-white"></span>
+    </div>
+    """ if st.session_state.is_playing else """
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+        <path d="M9 18V5l12-2v13M9 9l12-2M6 18a3 3 0 100-6 3 3 0 000 6zM18 16a3 3 0 100-6 3 3 0 000 6z"/>
+    </svg>
+    """
+
+    player_card = f"""
+    <div style="background: #ffffff; border-radius: 20px; padding: 12px 16px; color: #0f172a; box-shadow: 0 12px 30px rgba(0,0,0,0.35); display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+        <div style="background: #2563eb; width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);">
+            {eq_bars}
+        </div>
+        <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 0.85rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #0f172a; margin-bottom: 4px;">
+                {curr_track['artist']} — {curr_track['title']}
             </div>
-            <div style="flex:1; min-width:0;">
-                <span style="font-size: 0.58rem; font-weight:bold; color:#1d4ed8; background:#eff6ff; padding: 1px 4px; border-radius: 3px;">
-                    {curr_track['tag']}
-                </span>
-                <div style="font-size:0.78rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px;">
-                    {curr_track['artist']} -- {curr_track['title']}
-                </div>
-                <div style="display:flex; align-items:center; gap: 6px; margin-top: 3px;">
-                    <div style="flex:1; height:3px; background:#e5e7eb; border-radius:2px; overflow:hidden;">
-                        <div style="height:100%; width:{'70%' if st.session_state.is_playing else '30%'}; background:#1d4ed8;"></div>
-                    </div>
-                    <span style="font-size: 0.58rem; color:#6b7280; font-family:monospace;">0:33 / -1:21</span>
-                </div>
+            <div style="height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; margin-bottom: 4px;">
+                <div style="height: 100%; width: {'65%' if st.session_state.is_playing else '30%'}; background: #2563eb; border-radius: 2px; transition: width 0.3s ease;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: #64748b; font-weight: 500;">
+                <span>0:33</span>
+                <span>-1:21</span>
             </div>
         </div>
     </div>
     """
-    render_html(track_card)
+    render_html(player_card)
 
-    # 3. Playback Control Buttons
-    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1, 1, 1, 1])
+    # 📌 3. ปุ่มควบคุมเครื่องเล่นเพลงแบบ Pill Buttons สีขาว (ด้านล่าง)
+    render_html("<div class='pill-btn'>")
+    ctrl1, ctrl2, ctrl3 = st.columns([1.2, 1, 1.2])
+    
     with ctrl1:
-        if st.button("⏮ Prev", use_container_width=True):
+        if st.button("Prev", use_container_width=True):
             st.session_state.current_track_idx = (st.session_state.current_track_idx - 1 + len(st.session_state.playlist)) % len(st.session_state.playlist)
             st.rerun()
+            
     with ctrl2:
-        play_label = "⏸ Pause" if st.session_state.is_playing else "▶ Play"
-        if st.button(play_label, type="primary", use_container_width=True):
+        like_symbol = "💙" if st.session_state.is_liked else "🤍"
+        if st.button(like_symbol, use_container_width=True):
+            st.session_state.is_liked = not st.session_state.is_liked
             st.session_state.is_playing = not st.session_state.is_playing
             st.rerun()
+            
     with ctrl3:
-        like_label = "💙" if st.session_state.is_liked else "🤍"
-        if st.button(like_label, use_container_width=True):
-            st.session_state.is_liked = not st.session_state.is_liked
-            st.rerun()
-    with ctrl4:
-        if st.button("Next ⏭", use_container_width=True):
+        if st.button("Next", use_container_width=True):
             st.session_state.current_track_idx = (st.session_state.current_track_idx + 1) % len(st.session_state.playlist)
             st.rerun()
+            
+    render_html("</div>")
 
+    # เล่นเสียงตัวอย่าง
     if st.session_state.is_playing and curr_track.get('preview'):
         st.audio(curr_track['preview'], autoplay=True)
 
