@@ -11,3 +11,4 @@ joblib
 numpy
 google-generativeai
 spotipy
+plotly

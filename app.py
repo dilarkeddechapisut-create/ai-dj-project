@@ -3,7 +3,9 @@ import pandas as pd
 import joblib
 import google.generativeai as genai
 import spotipy
+import plotly.graph_objects as go
 from spotipy.oauth2 import SpotifyClientCredentials
+
 
 st.set_page_config(page_title="AI DJ Mood Matcher", page_icon="🎧", layout="centered")
 st.title("🎧 AI DJ: จัด Playlist ตามอารมณ์")
@@ -115,3 +117,40 @@ if st.button("🎵 จัด Playlist ให้หน่อย", type="primary",
                         st.audio(preview_url, format="audio/mp3")
                         
                 st.divider() # เส้นคั่นแต่ละเพลง
+
+# --- ส่วนที่เพิ่มใหม่: สร้าง Radar Chart ---
+            st.markdown("---") # เส้นคั่น
+            
+            # คำนวณค่าเฉลี่ยของ Playlist
+            avg_energy = cluster_songs['energy'].mean()
+            avg_valence = cluster_songs['valence'].mean()
+            # ปรับสเกล Tempo ให้เป็น 0-1 เพื่อให้พล็อตกราฟร่วมกับตัวอื่นได้ (สมมติ Tempo สูงสุดที่ 200)
+            avg_tempo_scaled = cluster_songs['tempo'].mean() / 200.0 
+
+            # เตรียมข้อมูลสำหรับกราฟใยแมงมุม (ต้องลากเส้นปิดจุดเริ่มต้น จึงต้องเพิ่มค่าแรกต่อท้าย)
+            categories = ['ความมันส์ (Energy)', 'ความสดใส (Valence)', 'ความเร็ว (Tempo)']
+            values = [avg_energy, avg_valence, avg_tempo_scaled]
+            categories.append(categories[0]) 
+            values.append(values[0])
+
+            # สร้างกราฟ Plotly
+            fig = go.Figure(data=go.Scatterpolar(
+                r=values,
+                theta=categories,
+                fill='toself',
+                fillcolor='rgba(29, 185, 84, 0.5)', # สีเขียวสไตล์ Spotify แบบโปร่งแสง
+                line_color='#1DB954'
+            ))
+
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(visible=True, range=[0, 1])
+                ),
+                showlegend=False,
+                title="📊 ระดับอารมณ์ของ Playlist นี้",
+                margin=dict(l=40, r=40, t=40, b=40)
+            )
+
+            # แสดงกราฟบน Streamlit
+            st.plotly_chart(fig, use_container_width=True)
+            # ----------------------------------------
