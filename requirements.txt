@@ -13,3 +13,4 @@ google-generativeai
 spotipy
 plotly
 requests
+streamlit-mic-recorder
