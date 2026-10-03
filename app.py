@@ -679,4 +679,9 @@ if st.session_state.playlist_data:
                     st.session_state.feedback_submitted = True
                     st.rerun()
             with btn_col2:
-                if st.button("👎 ยังไม่ค่อยโดน", use
+                if st.button("👎 ยังไม่ค่อยโดน", use_container_width=True):
+                    save_feedback(data["mood"], data["cluster"], "Dislike")
+                    st.session_state.feedback_submitted = True
+                    st.rerun()
+        else:
+            st.success("💖 ขอบคุณสำหรับคำติชมครับ! ระบบบันทึกข้อมูลเรียบร้อยแล้ว")
