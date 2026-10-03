@@ -1,156 +1,155 @@
 import streamlit as st
 import pandas as pd
 import joblib
-import google.generativeai as genai
-import spotipy
+import os
+import csv
+from datetime import datetime
 import plotly.graph_objects as go
-from spotipy.oauth2 import SpotifyClientCredentials
+import google.generativeai as genai
 
-
-st.set_page_config(page_title="AI DJ Mood Matcher", page_icon="🎧", layout="centered")
+st.set_page_config(page_title="AI DJ Mood Matcher", page_icon="🎧")
 st.title("🎧 AI DJ: จัด Playlist ตามอารมณ์")
+st.markdown("พิมพ์บอกความรู้สึกของคุณ แล้วให้ AI DJ จัดเพลงให้เลย!")
 
-# 1. โหลดค่า Secrets และตั้งค่า APIs
+# 1. ตั้งค่า Google Gemini API
 try:
-    # ตั้งค่า Gemini
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel('gemini-3.6-flash')
-    
-    # ตั้งค่า Spotify
-    sp_client_id = st.secrets["SPOTIPY_CLIENT_ID"]
-    sp_client_secret = st.secrets["SPOTIPY_CLIENT_SECRET"]
-    sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-        client_id=sp_client_id, 
-        client_secret=sp_client_secret
-    ))
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=GOOGLE_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
-    st.error("🚨 กรุณาตั้งค่า API Keys (Google และ Spotify) ใน Streamlit Secrets ก่อน")
+    st.error("🚨 ไม่พบ API Key! กรุณาตั้งค่า GOOGLE_API_KEY ใน Streamlit Secrets")
     st.stop()
 
-# 2. โหลดโมเดล (ฟังก์ชันเดิม)
+# 2. โหลดโมเดล
 @st.cache_resource
 def load_models():
-    return joblib.load('kmeans_model.pkl'), joblib.load('scaler.pkl'), pd.read_csv('spotify_clustered.csv')
-kmeans, scaler, df_songs = load_models()
+    km = joblib.load('kmeans_model.pkl')
+    sc = joblib.load('scaler.pkl')
+    df = pd.read_csv('spotify_clustered.csv')
+    return km, sc, df
 
-# 3. วิเคราะห์อารมณ์ (ฟังก์ชันเดิม)
+try:
+    kmeans, scaler, df_songs = load_models()
+except Exception as e:
+    st.error("ไม่พบไฟล์โมเดล .pkl หรือ .csv กรุณาอัปโหลดขึ้น GitHub ให้ครบ")
+    st.stop()
+
+# 3. ฟังก์ชันวิเคราะห์อารมณ์
 def analyze_mood_to_features(text):
     text = text.lower()
     energy, valence, tempo = 0.5, 0.5, 100.0 
-    if any(word in text for word in ["เศร้า", "เหงา", "อกหัก"]): return 0.2, 0.2, 80.0
-    if any(word in text for word in ["สนุก", "มันส์", "เต้น"]): return 0.8, 0.8, 130.0
-    if any(word in text for word in ["ชิล", "สบาย", "ทำงาน"]): return 0.4, 0.6, 90.0
-    if any(word in text for word in ["โกรธ", "โมโห", "ร็อค"]): return 0.9, 0.3, 140.0
+    if any(word in text for word in ["เศร้า", "เหงา", "อกหัก", "ร้องไห้", "เหนื่อย", "ดิ่ง"]):
+        energy, valence, tempo = 0.2, 0.2, 80.0
+    elif any(word in text for word in ["สนุก", "มันส์", "เต้น", "ปาร์ตี้", "ตื่นเต้น", "สดใส"]):
+        energy, valence, tempo = 0.8, 0.8, 130.0
+    elif any(word in text for word in ["ชิล", "สบาย", "ทำงาน", "อ่านหนังสือ", "กาแฟ", "พักผ่อน"]):
+        energy, valence, tempo = 0.4, 0.6, 90.0
+    elif any(word in text for word in ["โกรธ", "โมโห", "เดือด", "ร็อค"]):
+        energy, valence, tempo = 0.9, 0.3, 140.0
     return energy, valence, tempo
 
-# 4. ฟังก์ชันค้นหาเพลงใน Spotify เพื่อดึงรูปปก 🌟 (แบบดักจับ Error)
-def get_spotify_track_info(track_name, artist_name):
-    try:
-        # ค้นหาโดยใช้ชื่อเพลงและชื่อศิลปิน
-        query = f"track:{track_name} artist:{artist_name}"
-        results = sp.search(q=query, type='track', limit=1)
+# 4. ฟังก์ชันบันทึก Feedback ลง CSV
+def save_feedback(mood, cluster, feedback_type):
+    file_exists = os.path.isfile('feedback_log.csv')
+    with open('feedback_log.csv', mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(['Timestamp', 'User_Mood', 'Predicted_Cluster', 'Feedback']) # สร้างหัวตาราง
         
-        if results and results['tracks']['items']:
-            track_data = results['tracks']['items'][0]
-            
-            # ดึงรูปปกอัลบั้ม (เช็คก่อนว่ามีรูปไหม)
-            images = track_data['album']['images']
-            image_url = images[1]['url'] if len(images) > 1 else (images[0]['url'] if images else None)
-            
-            preview_url = track_data.get('preview_url') 
-            spotify_url = track_data['external_urls'].get('spotify')
-            
-            return image_url, preview_url, spotify_url
-            
-        return None, None, None
-        
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดจาก Spotify: {e}") # บรรทัดนี้จะโชว์ Error สีแดงบนหน้าเว็บ
-        return None, None, None
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        writer.writerow([timestamp, mood, cluster, feedback_type])
 
-# 5. UI หน้าเว็บ
-mood_text = st.text_area("วันนี้คุณรู้สึกอย่างไร?", placeholder="เช่น เหงาจังเลย อยากฟังเพลงเศร้า")
+# ---------------------------------------------------------
+# ระบบ Session State เพื่อจำผลลัพธ์ไม่ให้หายไปตอนกดปุ่ม Feedback
+if 'playlist_data' not in st.session_state:
+    st.session_state.playlist_data = None
+if 'feedback_submitted' not in st.session_state:
+    st.session_state.feedback_submitted = False
+# ---------------------------------------------------------
 
+mood_text = st.text_area("วันนี้คุณรู้สึกอย่างไร?", placeholder="เช่น วันนี้ฝนตก เหงาจังเลย อยากได้เพลงฮีลใจ")
+
+# เมื่อกดปุ่ม จัด Playlist
 if st.button("🎵 จัด Playlist ให้หน่อย", type="primary", use_container_width=True):
     if not mood_text:
         st.warning("กรุณาพิมพ์ความรู้สึกของคุณก่อนครับ")
     else:
-        with st.spinner("DJ กำลังจัดเพลงและดึงรูปปกจาก Spotify..."):
-            # จัดกลุ่มและสุ่มเพลง
+        with st.spinner("DJ (Gemini) กำลังวิเคราะห์อารมณ์และจัดเพลง..."):
             t_energy, t_valence, t_tempo = analyze_mood_to_features(mood_text)
             user_features = [[0.5, t_energy, t_valence, t_tempo]]
-            predicted_cluster = kmeans.predict(scaler.transform(user_features))[0]
+            scaled_input = scaler.transform(user_features)
+            predicted_cluster = kmeans.predict(scaled_input)[0]
+            
             cluster_songs = df_songs[df_songs['cluster_id'] == predicted_cluster]
             sampled_songs = cluster_songs.sample(min(5, len(cluster_songs)))
             
+            song_list_str = "\n".join([f"- {row['track_name']} (ศิลปิน: {row['artists']})" for _, row in sampled_songs.iterrows()])
+            
             # ให้ Gemini แต่งคำพูด
-            song_names = ", ".join(sampled_songs['track_name'].tolist())
-            prompt = f"คุณคือ DJ AI ผู้ใช้บ่นว่า '{mood_text}' ให้แนะนำเพลงเหล่านี้สั้นๆ เป็นภาษาไทย: {song_names}"
-            dj_response = model.generate_content(prompt).text
-            
-            st.success("จัดเพลงเสร็จเรียบร้อย!")
-            st.info(f"💬 **DJ AI:** {dj_response}")
-            
-            st.markdown("### 🎼 เพลย์ลิสต์ของคุณ")
-            
-            # วนลูปแสดงเพลงทีละบรรทัด พร้อมรูปปก 🌟
-            for _, row in sampled_songs.iterrows():
-                # ดึงข้อมูลจาก Spotify
-                img_url, preview_url, spot_url = get_spotify_track_info(row['track_name'], row['artists'])
-                
-                # แบ่งหน้าจอเป็น 2 คอลัมน์ (ซ้ายรูป ขวาข้อความ)
-                col1, col2 = st.columns([1, 4])
-                
-                with col1:
-                    if img_url:
-                        st.image(img_url, width=120)
-                    else:
-                        st.write("💿 No Image")
-                        
-                with col2:
-                    st.subheader(row['track_name'])
-                    st.write(f"🎤 ศิลปิน: {row['artists']}")
-                    
-                    if spot_url:
-                        st.markdown(f"[🎧 ฟังเต็มๆ บน Spotify]({spot_url})")
-                    if preview_url:
-                        st.audio(preview_url, format="audio/mp3")
-                        
-                st.divider() # เส้นคั่นแต่ละเพลง
+            prompt = f"คุณคือ 'DJ AI' ผู้ใช้บอกความรู้สึกว่า: '{mood_text}' เพลงที่เลือกคือ: {song_list_str} จงเขียนแนะนำสั้นๆ ภาษาไทย เป็นกันเอง"
+            try:
+                dj_response = model.generate_content(prompt).text
+            except Exception as e:
+                dj_response = "(ระบบ Gemini ขัดข้องชั่วคราว) แต่นี่คือเพลงที่เราจัดไว้ให้ครับ!"
 
-# --- ส่วนที่เพิ่มใหม่: สร้าง Radar Chart ---
-            st.markdown("---") # เส้นคั่น
-            
-            # คำนวณค่าเฉลี่ยของ Playlist
-            avg_energy = cluster_songs['energy'].mean()
-            avg_valence = cluster_songs['valence'].mean()
-            # ปรับสเกล Tempo ให้เป็น 0-1 เพื่อให้พล็อตกราฟร่วมกับตัวอื่นได้ (สมมติ Tempo สูงสุดที่ 200)
-            avg_tempo_scaled = cluster_songs['tempo'].mean() / 200.0 
+            # บันทึกข้อมูลทั้งหมดลง Session State เพื่อนำไปแสดงผล
+            st.session_state.playlist_data = {
+                "mood": mood_text,
+                "cluster": predicted_cluster,
+                "songs_str": song_list_str,
+                "dj_text": dj_response,
+                "sampled_songs": sampled_songs
+            }
+            # รีเซ็ตสถานะการกด Feedback เป็น False เสมอเมื่อจัดเพลงใหม่
+            st.session_state.feedback_submitted = False
 
-            # เตรียมข้อมูลสำหรับกราฟใยแมงมุม (ต้องลากเส้นปิดจุดเริ่มต้น จึงต้องเพิ่มค่าแรกต่อท้าย)
-            categories = ['ความมันส์ (Energy)', 'ความสดใส (Valence)', 'ความเร็ว (Tempo)']
-            values = [avg_energy, avg_valence, avg_tempo_scaled]
-            categories.append(categories[0]) 
-            values.append(values[0])
+# ==========================================
+# ส่วนแสดงผลลัพธ์ (จะแสดงเมื่อมีข้อมูลใน Session State)
+# ==========================================
+if st.session_state.playlist_data:
+    data = st.session_state.playlist_data
+    
+    st.success("จัดเพลงเสร็จเรียบร้อย!")
+    st.markdown("### 💬 ข้อความจาก DJ AI (Powered by Google Gemini)")
+    st.info(data["dj_text"])
+    
+    st.markdown(f"### 🎼 รายชื่อเพลง (กลุ่มดนตรีที่ {data['cluster']})")
+    st.text(data["songs_str"])
 
-            # สร้างกราฟ Plotly
-            fig = go.Figure(data=go.Scatterpolar(
-                r=values,
-                theta=categories,
-                fill='toself',
-                fillcolor='rgba(29, 185, 84, 0.5)', # สีเขียวสไตล์ Spotify แบบโปร่งแสง
-                line_color='#1DB954'
-            ))
+    # --- ส่วนแสดง Radar Chart ---
+    st.markdown("---")
+    avg_energy = data["sampled_songs"]['energy'].mean()
+    avg_valence = data["sampled_songs"]['valence'].mean()
+    avg_tempo_scaled = data["sampled_songs"]['tempo'].mean() / 200.0 
 
-            fig.update_layout(
-                polar=dict(
-                    radialaxis=dict(visible=True, range=[0, 1])
-                ),
-                showlegend=False,
-                title="📊 ระดับอารมณ์ของ Playlist นี้",
-                margin=dict(l=40, r=40, t=40, b=40)
-            )
+    categories = ['ความมันส์ (Energy)', 'ความสดใส (Valence)', 'ความเร็ว (Tempo)']
+    values = [avg_energy, avg_valence, avg_tempo_scaled]
+    categories.append(categories[0]) 
+    values.append(values[0])
 
-            # แสดงกราฟบน Streamlit
-            st.plotly_chart(fig, use_container_width=True)
-            # ----------------------------------------
+    fig = go.Figure(data=go.Scatterpolar(
+        r=values, theta=categories, fill='toself', fillcolor='rgba(29, 185, 84, 0.5)', line_color='#1DB954'
+    ))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=False, title="📊 ระดับอารมณ์ของ Playlist นี้")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- ส่วนระบบ Feedback ---
+    st.markdown("---")
+    st.markdown("### 📝 คุณชอบ Playlist นี้ไหม?")
+    
+    # ถ้ายังไม่ได้กด Feedback ให้แสดงปุ่ม
+    if not st.session_state.feedback_submitted:
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("👍 โดนใจสุดๆ", use_container_width=True):
+                save_feedback(data["mood"], data["cluster"], "Like")
+                st.session_state.feedback_submitted = True
+                st.rerun() # สั่งรีเฟรชหน้าเว็บ 1 ครั้งเพื่อซ่อนปุ่ม
+        with col2:
+            if st.button("👎 ไม่ค่อยเข้ากัน", use_container_width=True):
+                save_feedback(data["mood"], data["cluster"], "Dislike")
+                st.session_state.feedback_submitted = True
+                st.rerun()
+    else:
+        # ถ้ากดไปแล้ว ให้แสดงคำขอบคุณแทนปุ่ม
+        st.success("💖 ขอบคุณสำหรับเสียงตอบรับครับ! ระบบบันทึกข้อมูลเพื่อนำไปพัฒนา AI เรียบร้อยแล้ว")
