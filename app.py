@@ -16,12 +16,6 @@ BG_VIDEO_URL = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07
 
 st.markdown(f"""
 <style>
-    /* ทำพื้นหลังหลักโปร่งใสเพื่อมองเห็นวิดีโอด้านหลัง */
-    .stApp {{
-        background: transparent !important;
-        color: #ffffff;
-    }}
-
     /* จัดสไตล์ตัววิดีโอเป็น Background เต็มจอ */
     #bg-video {{
         position: fixed;
